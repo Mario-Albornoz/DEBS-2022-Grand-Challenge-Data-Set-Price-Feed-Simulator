@@ -1,0 +1,26 @@
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic: "raw-ticks"
+
+publisher:
+  batch_size: 500
+  batch_timeout_ms: 15
+  compression: "snappy"
+  workers: 4
+
+simulator:
+  mode: "realtime"
+  acceleration_factor: 1.0
+  data_dir: "data"
+  file_pattern: "debs2022-gc-trading-day-*.csv"
+
+performance:
+  csv_buffer_kb: 256
+  parse_workers: 8
+  channel_buffer: 10000
+  use_mmap: false
+
+logging:
+  stats_interval_sec: 5
+  level: "info"
