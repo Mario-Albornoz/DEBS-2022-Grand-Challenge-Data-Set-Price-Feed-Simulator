@@ -1,0 +1,45 @@
+
+# Binaries
+/aggregator
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Output of go build
+/cmd/aggregator/aggregator
+
+# Registry persistence data
+data/
+*.gob
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.cursor/
+.skills/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Test coverage
+*.out
+coverage.html
+
+# Logs
+*.log
+
+# Dataset
+data/
