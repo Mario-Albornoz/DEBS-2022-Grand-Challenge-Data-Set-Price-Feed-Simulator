@@ -1,0 +1,219 @@
+package simulator
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/config"
+	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
+	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/parser"
+	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/publisher"
+)
+
+type SimulatorStats struct {
+	TicksRead      uint64
+	TicksPublished uint64
+	TicksFailed    uint64
+	BytesRead      uint64
+	StartTime      time.Time
+}
+
+type Simulator struct {
+	config    *config.Config
+	parser    *parser.CSVParser
+	publisher *publisher.KafkaPublisher
+	timing    *TimingSimulator
+	stats     SimulatorStats
+	stopOnce  sync.Once
+}
+
+// NewSimulator creates a new simulator instance with all required components.
+func NewSimulator(cfg *config.Config) (*Simulator, error) {
+	pub, err := publisher.NewKafkaPublisher(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create publisher: %w", err)
+	}
+
+	mode := SimulationMode(cfg.Simulator.Mode)
+	timing := NewTimingSimulator(mode, cfg.Simulator.AccelerationFactor)
+
+	return &Simulator{
+		config:    cfg,
+		parser:    parser.NewCSVParser(cfg),
+		publisher: pub,
+		timing:    timing,
+		stats: SimulatorStats{
+			StartTime: time.Now(),
+		},
+	}, nil
+}
+
+// Start begins the simulation, processing all CSV files and publishing to Kafka.
+func (s *Simulator) Start(ctx context.Context) error {
+	log.Printf("[INFO] Starting price feed simulator in %s mode", s.config.Simulator.Mode)
+	log.Printf("[INFO] Connecting to Kafka broker: %v", s.config.Kafka.Brokers)
+
+	files, err := s.findCSVFiles()
+	if err != nil {
+		return fmt.Errorf("find CSV files: %w", err)
+	}
+
+	if len(files) == 0 {
+		return fmt.Errorf("no CSV files found matching pattern %q in %q",
+			s.config.Simulator.FilePattern, s.config.Simulator.DataDir)
+	}
+
+	log.Printf("[INFO] Found %d CSV files to process", len(files))
+	log.Printf("[INFO] Starting %d parser workers and %d publisher workers",
+		s.config.Performance.ParseWorkers, s.config.Publisher.Workers)
+
+	parserChan := make(chan *model.RawTick, s.config.Performance.ChannelBuffer)
+	timingChan := make(chan *model.RawTick, 1000)
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.timingWorker(ctx, parserChan, timingChan)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := s.publisher.Start(ctx, timingChan); err != nil {
+			log.Printf("[ERROR] Publisher error: %v", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.statsLogger(ctx)
+	}()
+
+	for _, file := range files {
+		if err := s.processFile(ctx, file, parserChan); err != nil {
+			log.Printf("[ERROR] Failed to process %s: %v", filepath.Base(file), err)
+		}
+	}
+
+	close(parserChan)
+	wg.Wait()
+
+	return nil
+}
+
+func (s *Simulator) processFile(ctx context.Context, filepath string, output chan<- *model.RawTick) error {
+	log.Printf("[INFO] Processing file: %s", filepath)
+	return s.parser.ParseFile(ctx, filepath, output)
+}
+
+func (s *Simulator) timingWorker(ctx context.Context, input <-chan *model.RawTick, output chan<- *model.RawTick) {
+	defer close(output)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case tick, ok := <-input:
+			if !ok {
+				return
+			}
+
+			atomic.AddUint64(&s.stats.TicksRead, 1)
+
+			s.timing.WaitForNextTick(tick)
+
+			select {
+			case output <- tick:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (s *Simulator) statsLogger(ctx context.Context) {
+	ticker := time.NewTicker(s.config.StatsInterval())
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.PrintStats()
+		}
+	}
+}
+
+func (s *Simulator) findCSVFiles() ([]string, error) {
+	pattern := filepath.Join(s.config.Simulator.DataDir, s.config.Simulator.FilePattern)
+	return filepath.Glob(pattern)
+}
+
+// Stop gracefully shuts down the simulator, flushing any pending messages.
+func (s *Simulator) Stop() error {
+	var err error
+	s.stopOnce.Do(func() {
+		err = s.publisher.Close()
+	})
+	return err
+}
+
+// PrintStats logs the current simulation statistics.
+func (s *Simulator) PrintStats() {
+	parserStats := s.parser.GetStats()
+	pubStats := s.publisher.GetStats()
+
+	ticksRead := atomic.LoadUint64(&s.stats.TicksRead)
+	elapsed := time.Since(s.stats.StartTime).Seconds()
+	throughput := float64(pubStats.Published) / elapsed
+
+	log.Println("[INFO] =====================================")
+	log.Printf("[INFO] Statistics (%ds interval):", s.config.Logging.StatsIntervalSec)
+	log.Printf("[INFO]   Ticks read:      %s", formatNumber(ticksRead))
+	log.Printf("[INFO]   Ticks published: %s", formatNumber(pubStats.Published))
+	log.Printf("[INFO]   Throughput:      %s ticks/sec", formatNumber(uint64(throughput)))
+	log.Printf("[INFO]   Errors:          %s", formatNumber(pubStats.Failed+parserStats.RowsFailed))
+	log.Printf("[INFO]   Bytes read:      %s", formatBytes(parserStats.BytesRead))
+	log.Println("[INFO] =====================================")
+}
+
+func formatNumber(n uint64) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%s", addCommas(n))
+}
+
+func addCommas(n uint64) string {
+	s := fmt.Sprintf("%d", n)
+	result := ""
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result += ","
+		}
+		result += string(c)
+	}
+	return result
+}
+
+func formatBytes(b uint64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := uint64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
