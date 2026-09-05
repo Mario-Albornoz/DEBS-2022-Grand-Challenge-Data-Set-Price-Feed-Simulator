@@ -4,13 +4,13 @@ kafka:
   topic: "raw-ticks"
 
 publisher:
-  batch_size: 500
-  batch_timeout_ms: 15
+  batch_size: 1000
+  batch_timeout_ms: 5
   compression: "snappy"
-  workers: 4
+  workers: 8
 
 simulator:
-  mode: "realtime"
+  mode: "fullspeed"
   acceleration_factor: 1.0
   data_dir: "data"
   file_pattern: "debs2022-gc-trading-day-*.csv"

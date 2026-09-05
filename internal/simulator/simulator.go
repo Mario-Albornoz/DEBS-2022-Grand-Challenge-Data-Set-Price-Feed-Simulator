@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,12 +25,13 @@ type SimulatorStats struct {
 }
 
 type Simulator struct {
-	config    *config.Config
-	parser    *parser.CSVParser
-	publisher *publisher.KafkaPublisher
-	timing    *TimingSimulator
-	stats     SimulatorStats
-	stopOnce  sync.Once
+	config      *config.Config
+	parser      *parser.CSVParser
+	publisher   *publisher.KafkaPublisher
+	timing      *TimingSimulator
+	stats       SimulatorStats
+	stopOnce    sync.Once
+	currentFile atomic.Value // stores string of current file being processed
 }
 
 // NewSimulator creates a new simulator instance with all required components.
@@ -110,6 +112,12 @@ func (s *Simulator) Start(ctx context.Context) error {
 }
 
 func (s *Simulator) processFile(ctx context.Context, filepath string, output chan<- *model.RawTick) error {
+	filename := filepath[len(filepath)-1:]
+	if idx := strings.LastIndex(filepath, "/"); idx >= 0 {
+		filename = filepath[idx+1:]
+	}
+
+	s.currentFile.Store(filename)
 	log.Printf("[INFO] Processing file: %s", filepath)
 	return s.parser.ParseFile(ctx, filepath, output)
 }
@@ -176,14 +184,62 @@ func (s *Simulator) PrintStats() {
 	elapsed := time.Since(s.stats.StartTime).Seconds()
 	throughput := float64(pubStats.Published) / elapsed
 
+	currentFile := "N/A"
+	if cf := s.currentFile.Load(); cf != nil {
+		currentFile = cf.(string)
+	}
+
 	log.Println("[INFO] =====================================")
 	log.Printf("[INFO] Statistics (%ds interval):", s.config.Logging.StatsIntervalSec)
-	log.Printf("[INFO]   Ticks read:      %s", formatNumber(ticksRead))
+	log.Printf("[INFO]   Current file:    %s", currentFile)
+	log.Printf("[INFO]   Ticks parsed:    %s", formatNumber(parserStats.RowsParsed))
+	log.Printf("[INFO]   Ticks sent:      %s", formatNumber(ticksRead))
 	log.Printf("[INFO]   Ticks published: %s", formatNumber(pubStats.Published))
 	log.Printf("[INFO]   Throughput:      %s ticks/sec", formatNumber(uint64(throughput)))
-	log.Printf("[INFO]   Errors:          %s", formatNumber(pubStats.Failed+parserStats.RowsFailed))
+
+	// Error breakdown
+	totalErrors := pubStats.Failed + parserStats.RowsFailed
+	log.Printf("[INFO]   Errors:          %s", formatNumber(totalErrors))
+	if totalErrors > 0 {
+		log.Printf("[INFO]     Parse errors:  %s", formatNumber(parserStats.RowsFailed))
+		if parserStats.ErrInsufficientFields > 0 {
+			log.Printf("[INFO]       - Insufficient fields: %s", formatNumber(parserStats.ErrInsufficientFields))
+		}
+		if parserStats.ErrInvalidTime > 0 {
+			log.Printf("[INFO]       - Invalid time:        %s", formatNumber(parserStats.ErrInvalidTime))
+		}
+		if parserStats.ErrInvalidDateTime > 0 {
+			log.Printf("[INFO]       - Invalid date/time:   %s", formatNumber(parserStats.ErrInvalidDateTime))
+		}
+		if parserStats.ErrInvalidNumber > 0 {
+			log.Printf("[INFO]       - Invalid number:      %s", formatNumber(parserStats.ErrInvalidNumber))
+		}
+		log.Printf("[INFO]     Publish errors: %s", formatNumber(pubStats.Failed))
+	}
+
+	// Empty field tracking - use RowsParsed for percentage
+	if parserStats.RowsParsed > 0 {
+		log.Printf("[INFO]   Empty fields:")
+		log.Printf("[INFO]     Ask:    %s (%.1f%%)", formatNumber(parserStats.EmptyAsk), percentage(parserStats.EmptyAsk, parserStats.RowsParsed))
+		log.Printf("[INFO]     Bid:    %s (%.1f%%)", formatNumber(parserStats.EmptyBid), percentage(parserStats.EmptyBid, parserStats.RowsParsed))
+		log.Printf("[INFO]     Volume: %s (%.1f%%)", formatNumber(parserStats.EmptyVolume), percentage(parserStats.EmptyVolume, parserStats.RowsParsed))
+
+		// Zero value tracking
+		log.Printf("[INFO]   Zero values:")
+		log.Printf("[INFO]     Ask:    %s (%.1f%%)", formatNumber(parserStats.ZeroAsk), percentage(parserStats.ZeroAsk, parserStats.RowsParsed))
+		log.Printf("[INFO]     Bid:    %s (%.1f%%)", formatNumber(parserStats.ZeroBid), percentage(parserStats.ZeroBid, parserStats.RowsParsed))
+		log.Printf("[INFO]     Volume: %s (%.1f%%)", formatNumber(parserStats.ZeroVolume), percentage(parserStats.ZeroVolume, parserStats.RowsParsed))
+	}
+
 	log.Printf("[INFO]   Bytes read:      %s", formatBytes(parserStats.BytesRead))
 	log.Println("[INFO] =====================================")
+}
+
+func percentage(part, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(part) / float64(total) * 100
 }
 
 func formatNumber(n uint64) string {

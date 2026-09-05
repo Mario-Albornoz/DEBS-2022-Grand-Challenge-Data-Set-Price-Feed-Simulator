@@ -49,6 +49,7 @@ func NewKafkaPublisher(cfg *config.Config) (*KafkaPublisher, error) {
 		WriteTimeout: 2 * time.Second,
 		MaxAttempts:  3,
 		Compression:  compression,
+		Async:        true, // Enable async writes for much higher throughput
 	}
 
 	return &KafkaPublisher{
