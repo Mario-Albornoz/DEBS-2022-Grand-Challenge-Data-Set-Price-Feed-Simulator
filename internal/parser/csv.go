@@ -161,29 +161,33 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	tick.TotalVolume = volume
 
 	tradingTime, err := parseTime(fields[23])
+	
+	// Parse Date/Time fields for completeness and fallback
+	date, timeVal, err2 := parseDateTime(fields[2], fields[3])
+	if err2 != nil {
+		ReleaseTick(tick)
+		atomic.AddUint64(&p.stats.ErrInvalidDateTime, 1)
+		return nil, fmt.Errorf("parse Date/Time: %w", err2)
+	}
+	tick.Date = date
+	tick.Time = timeVal
+	
+	// Handle TradingTime
 	if err != nil {
-		// TradingTime is often empty - use Date/Time fields as fallback
-		date, timeVal, err := parseDateTime(fields[2], fields[3])
-		if err != nil {
-			ReleaseTick(tick)
-			atomic.AddUint64(&p.stats.ErrInvalidDateTime, 1)
-			return nil, fmt.Errorf("parse Date/Time: %w", err)
-		}
-		tick.Date = date
-		tick.Time = timeVal
-		tick.TradingTime = timeVal // Use Time field as TradingTime
+		// TradingTime is empty/invalid - use Time field as fallback
+		tick.TradingTime = timeVal
+	} else if tradingTime.Year() == 0 {
+		// TradingTime has year 0 (e.g., "00:00:00.348" → "0000-01-01T00:00:00.348Z")
+		// Extract time-of-day from TradingTime and combine with date from Date field
+		// This preserves millisecond precision that Time field lacks
+		tick.TradingTime = time.Date(
+			date.Year(), date.Month(), date.Day(),
+			tradingTime.Hour(), tradingTime.Minute(), tradingTime.Second(), tradingTime.Nanosecond(),
+			time.UTC,
+		)
 	} else {
+		// TradingTime is valid, use it as-is
 		tick.TradingTime = tradingTime
-		
-		// Still parse Date/Time for completeness
-		date, timeVal, err := parseDateTime(fields[2], fields[3])
-		if err != nil {
-			ReleaseTick(tick)
-			atomic.AddUint64(&p.stats.ErrInvalidDateTime, 1)
-			return nil, fmt.Errorf("parse Date/Time: %w", err)
-		}
-		tick.Date = date
-		tick.Time = timeVal
 	}
 
 	// Only count empty/zero fields for successfully parsed rows
