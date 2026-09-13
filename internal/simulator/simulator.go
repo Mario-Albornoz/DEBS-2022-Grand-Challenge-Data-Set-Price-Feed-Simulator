@@ -77,18 +77,22 @@ func (s *Simulator) Start(ctx context.Context) error {
 	parserChan := make(chan *model.RawTick, s.config.Performance.ChannelBuffer)
 	timingChan := make(chan *model.RawTick, 1000)
 
+	// Create cancelable context for workers so we can stop them when done
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
+
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.timingWorker(ctx, parserChan, timingChan)
+		s.timingWorker(workerCtx, parserChan, timingChan)
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := s.publisher.Start(ctx, timingChan); err != nil {
+		if err := s.publisher.Start(workerCtx, timingChan); err != nil {
 			log.Printf("[ERROR] Publisher error: %v", err)
 		}
 	}()
@@ -96,7 +100,7 @@ func (s *Simulator) Start(ctx context.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.statsLogger(ctx)
+		s.statsLogger(workerCtx)
 	}()
 
 	for _, file := range files {
@@ -106,7 +110,11 @@ func (s *Simulator) Start(ctx context.Context) error {
 	}
 
 	close(parserChan)
+
+	// Wait for all workers to finish processing
 	wg.Wait()
+
+	log.Printf("[INFO] All files processed, simulator shutting down gracefully")
 
 	return nil
 }
