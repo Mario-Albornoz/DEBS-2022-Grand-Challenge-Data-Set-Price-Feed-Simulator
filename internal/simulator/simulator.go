@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/anomaly"
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/config"
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/parser"
@@ -20,6 +21,7 @@ type SimulatorStats struct {
 	TicksRead      uint64
 	TicksPublished uint64
 	TicksFailed    uint64
+	TicksDropped   uint64 // Anomalies dropped
 	BytesRead      uint64
 	StartTime      time.Time
 }
@@ -29,6 +31,7 @@ type Simulator struct {
 	parser      *parser.CSVParser
 	publisher   *publisher.KafkaPublisher
 	timing      *TimingSimulator
+	anomaly     *anomaly.Injector
 	stats       SimulatorStats
 	stopOnce    sync.Once
 	currentFile atomic.Value // stores string of current file being processed
@@ -44,11 +47,23 @@ func NewSimulator(cfg *config.Config) (*Simulator, error) {
 	mode := SimulationMode(cfg.Simulator.Mode)
 	timing := NewTimingSimulator(mode, cfg.Simulator.AccelerationFactor)
 
+	// Initialize anomaly injector (can be nil if disabled)
+	anomalyInj, err := anomaly.NewInjector(cfg.Anomaly)
+	if err != nil {
+		return nil, fmt.Errorf("create anomaly injector: %w", err)
+	}
+
+	if anomalyInj != nil {
+		log.Printf("[INFO] Anomaly injection ENABLED (seed: %d, log: %s)", 
+			cfg.Anomaly.Seed, cfg.Anomaly.LogFile)
+	}
+
 	return &Simulator{
 		config:    cfg,
 		parser:    parser.NewCSVParser(cfg),
 		publisher: pub,
 		timing:    timing,
+		anomaly:   anomalyInj,
 		stats: SimulatorStats{
 			StartTime: time.Now(),
 		},
@@ -144,6 +159,20 @@ func (s *Simulator) timingWorker(ctx context.Context, input <-chan *model.RawTic
 
 			atomic.AddUint64(&s.stats.TicksRead, 1)
 
+			// Apply anomaly injection if enabled
+			if s.anomaly != nil {
+				modifiedTick, shouldDrop, err := s.anomaly.ProcessTick(tick)
+				if err != nil {
+					log.Printf("[WARN] Anomaly injection error for %s: %v", tick.ID, err)
+				} else if shouldDrop {
+					// Tick dropped by anomaly injector
+					atomic.AddUint64(&s.stats.TicksDropped, 1)
+					parser.ReleaseTick(tick)
+					continue
+				}
+				tick = modifiedTick
+			}
+
 			s.timing.WaitForNextTick(tick)
 
 			select {
@@ -178,6 +207,11 @@ func (s *Simulator) findCSVFiles() ([]string, error) {
 func (s *Simulator) Stop() error {
 	var err error
 	s.stopOnce.Do(func() {
+		if s.anomaly != nil {
+			if closeErr := s.anomaly.Close(); closeErr != nil {
+				log.Printf("[WARN] Failed to close anomaly injector: %v", closeErr)
+			}
+		}
 		err = s.publisher.Close()
 	})
 	return err
@@ -240,6 +274,37 @@ func (s *Simulator) PrintStats() {
 	}
 
 	log.Printf("[INFO]   Bytes read:      %s", formatBytes(parserStats.BytesRead))
+	
+	// Anomaly statistics
+	if s.anomaly != nil {
+		anomalyStats := s.anomaly.GetStats()
+		ticksDropped := atomic.LoadUint64(&s.stats.TicksDropped)
+		
+		log.Printf("[INFO]   Anomaly Injection:")
+		log.Printf("[INFO]     Ticks dropped:  %s (Phase1: %s, Phase3: %s)", 
+			formatNumber(ticksDropped),
+			formatNumber(anomalyStats.Phase1Dropped),
+			formatNumber(anomalyStats.Phase3Dropped))
+		log.Printf("[INFO]     Ticks modified: %s (Phase2: %s, Phase4: %s)", 
+			formatNumber(anomalyStats.Phase2Injected + anomalyStats.Phase4Injected),
+			formatNumber(anomalyStats.Phase2Injected),
+			formatNumber(anomalyStats.Phase4Injected))
+		
+		if anomalyStats.Phase2Injected > 0 {
+			log.Printf("[INFO]       Contextual: Spikes=%s, Stale=%s, Inversions=%s",
+				formatNumber(anomalyStats.PriceSpikes),
+				formatNumber(anomalyStats.StalePrices),
+				formatNumber(anomalyStats.BidAskInversions))
+		}
+		
+		if anomalyStats.Phase4Injected > 0 {
+			log.Printf("[INFO]       Point failures: Null=%s, Malformed=%s, TimeInv=%s",
+				formatNumber(anomalyStats.NullPrices),
+				formatNumber(anomalyStats.MalformedISINs),
+				formatNumber(anomalyStats.TimestampInversions))
+		}
+	}
+	
 	log.Println("[INFO] =====================================")
 }
 

@@ -160,6 +160,15 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	}
 	tick.TotalVolume = volume
 
+	// Parse Last trade price (column 21)
+	lastPrice, _, err := parseFloatWithTracking(fields[21])
+	if err != nil {
+		ReleaseTick(tick)
+		atomic.AddUint64(&p.stats.ErrInvalidNumber, 1)
+		return nil, fmt.Errorf("parse LastTradedPrice: %w", err)
+	}
+	tick.LastTradedPrice = lastPrice
+
 	tradingTime, err := parseTime(fields[23])
 	
 	// Parse Date/Time fields for completeness and fallback

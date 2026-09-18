@@ -14,13 +14,18 @@ type RawTick struct {
 	SecType  string `json:"SecType"`
 	ISIN     string `json:"ISIN"`
 
-	Bid         float64 `json:"Bid"`
-	Ask         float64 `json:"Ask"`
-	TotalVolume float64 `json:"TotalVolume"`
+	Bid             float64 `json:"Bid"`
+	Ask             float64 `json:"Ask"`
+	TotalVolume     float64 `json:"TotalVolume"`
+	LastTradedPrice float64 `json:"Last"`
 
 	TradingTime time.Time `json:"TradingTime"`
 	Date        time.Time `json:"Date"`
 	Time        time.Time `json:"Time"`
+	
+	// Anomaly injection metadata (omitted when false/empty)
+	AnomalyInjected bool   `json:"anomaly_injected,omitempty"`
+	AnomalyType     string `json:"anomaly_type,omitempty"`
 }
 
 // ExtractExchange parses the exchange code from an instrument ID.
@@ -56,6 +61,9 @@ func (r *RawTick) Validate() error {
 	if r.TotalVolume < 0 {
 		return fmt.Errorf("TotalVolume must be non-negative, got %f", r.TotalVolume)
 	}
+	if r.LastTradedPrice < 0 {
+		return fmt.Errorf("LastTradedPrice must be non-negative, got %f", r.LastTradedPrice)
+	}
 	if r.TradingTime.IsZero() {
 		return errors.New("TradingTime is required")
 	}
@@ -64,6 +72,6 @@ func (r *RawTick) Validate() error {
 
 // String returns a human-readable representation of the RawTick.
 func (r *RawTick) String() string {
-	return fmt.Sprintf("RawTick{ID: %s, Exchange: %s, SecType: %s, Bid: %.2f, Ask: %.2f, Volume: %.0f, Time: %s}",
-		r.ID, r.Exchange, r.SecType, r.Bid, r.Ask, r.TotalVolume, r.TradingTime.Format("15:04:05"))
+	return fmt.Sprintf("RawTick{ID: %s, Exchange: %s, SecType: %s, Bid: %.2f, Ask: %.2f, Last: %.2f, Volume: %.0f, Time: %s}",
+		r.ID, r.Exchange, r.SecType, r.Bid, r.Ask, r.LastTradedPrice, r.TotalVolume, r.TradingTime.Format("15:04:05"))
 }

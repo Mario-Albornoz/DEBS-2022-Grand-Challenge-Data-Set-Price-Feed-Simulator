@@ -1,0 +1,140 @@
+# Price Feed Simulator - 3-Day Sequential Anomaly Injection
+# Optimized for thesis validation with date-specific phases
+
+kafka:
+  brokers:
+    - localhost:9092
+  topic: raw-ticks
+
+publisher:
+  batch_size: 500
+  batch_timeout_ms: 15
+  compression: snappy
+  workers: 4
+
+simulator:
+  mode: accelerated
+  acceleration_factor: 10
+  data_dir: data
+  file_pattern: "debs2022-gc-trading-day-*.csv"
+
+performance:
+  csv_buffer_kb: 256
+  parse_workers: 8
+  channel_buffer: 10000
+  use_mmap: false
+
+logging:
+  stats_interval_sec: 5
+  level: info
+
+# ===== 3-DAY ANOMALY EXPERIMENT =====
+# Day 08 (Monday):   Phase 1 (morning) + Phase 3 (afternoon)
+# Day 09 (Tuesday):  Phase 2 (full day)
+# Day 10 (Wednesday): Phase 4 (full day)
+# Day 11 (Thursday): Baseline (no anomalies)
+# Day 12 (Friday):   Baseline (no anomalies)
+
+anomaly:
+  enabled: true
+  seed: 42
+  log_file: anomaly_log.csv
+
+  # Phase 1: Gradual Tick Rate Decline
+  # Monday 08-11-2021, morning session
+  phase1_tick_rate_decline:
+    enabled: true
+    date_filter: ["08-11-2021"]
+    window:
+      start: "09:30:00"
+      end:   "14:00:00"
+    decline_pattern: linear
+    initial_rate: 1.0      # 1.0 = 100%
+    final_rate: 0.3        # 0.3 = 30%
+    instrument_ratio: 0.4  # 0.4 = 40% of instruments
+
+  # Phase 2: Contextual Price Anomalies
+  # Tuesday 09-11-2021, full trading day
+  phase2_contextual_anomalies:
+    enabled: true
+    date_filter: ["09-11-2021"]
+    window:
+      start: "09:30:00"
+      end:   "15:00:00"
+    context_window_hours: 1.0  # 1.0 = last 1 hour
+
+    strategies:
+      - type: price_spike
+        probability: 0.03           # 0.03 = 3%
+        deviation_range: [2.0, 5.0] # [2.0, 5.0] = 2x-5x multiplier
+
+      - type: stale_price
+        probability: 0.05           # 0.05 = 5%
+        repeat_count: [3, 10]       # [3, 10] times
+
+      - type: bid_ask_inversion
+        probability: 0.01           # 0.01 = 1%
+
+  # Phase 3: Feed Silence
+  # Monday 08-11-2021, afternoon session (same day as Phase 1)
+  phase3_feed_silence:
+    enabled: true
+    date_filter: ["08-11-2021"]
+    window:
+      start: "14:30:00"
+      end:   "16:00:00"
+    blackout_seconds: 30        # 30 seconds per instrument
+    instrument_ratio: 0.7       # 0.7 = 70%
+    exchange_filter: ["XETRA"]
+
+  # Phase 4: Sudden Point Failures
+  # Wednesday 10-11-2021, full trading day
+  phase4_point_failures:
+    enabled: true
+    date_filter: ["10-11-2021"]
+    window:
+      start: "09:30:00"
+      end:   "15:30:00"
+
+    strategies:
+      - type: null_price
+        probability: 0.02          # 0.02 = 2%
+        field: ["Bid", "Ask", "both"]
+
+      - type: malformed_isin
+        probability: 0.01          # 0.01 = 1%
+        corruption: ["truncate", "random_chars"]
+
+      - type: timestamp_inversion
+        probability: 0.015         # 0.015 = 1.5%
+        rewind_seconds: [1, 300]   # [1, 300] = 1-300 seconds
+
+# ===== EXPERIMENT TIMELINE =====
+# Monday 08-11-2021:
+#   09:30-14:00: Phase 1 (Tick Rate Decline)
+#   14:30-16:00: Phase 3 (Feed Silence)
+#
+# Tuesday 09-11-2021:
+#   09:30-15:00: Phase 2 (Contextual Anomalies)
+#
+# Wednesday 10-11-2021:
+#   09:30-15:30: Phase 4 (Point Failures)
+#
+# Thursday 11-11-2021:
+#   BASELINE (no anomalies)
+#
+# Friday 12-11-2021:
+#   BASELINE (no anomalies)
+
+# To test individual days:
+# anomaly:
+#   enabled: true
+#   phase1_tick_rate_decline:
+#     enabled: false
+#   phase2_contextual_anomalies:
+#     enabled: true
+#     date_filter: ["09-11-2021"]  # ← Only Tuesday
+#   phase3_feed_silence:
+#     enabled: false
+#   phase4_point_failures:
+#     enabled: false

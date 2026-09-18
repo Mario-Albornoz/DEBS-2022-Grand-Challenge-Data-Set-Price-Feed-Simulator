@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/anomaly"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,6 +20,7 @@ type Config struct {
 	Simulator   SimulatorConfig   `yaml:"simulator"`
 	Performance PerformanceConfig `yaml:"performance"`
 	Logging     LoggingConfig     `yaml:"logging"`
+	Anomaly     anomaly.Config    `yaml:"anomaly"`
 }
 
 type KafkaConfig struct {
@@ -102,6 +104,7 @@ func Default() Config {
 			StatsIntervalSec: 5,
 			Level:            "info",
 		},
+		Anomaly: anomaly.DefaultConfig(),
 	}
 }
 
@@ -143,6 +146,11 @@ func (c Config) Validate() error {
 	if c.Logging.StatsIntervalSec <= 0 {
 		return errors.New("logging.stats_interval_sec must be greater than zero")
 	}
+	
+	if err := c.Anomaly.Validate(); err != nil {
+		return fmt.Errorf("anomaly config: %w", err)
+	}
+	
 	return nil
 }
 

@@ -16,7 +16,7 @@ func TestParseRow(t *testing.T) {
 
 	validRow := "RDSA.NL,E,08-11-2021,09:30:45.123,100.75,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,NL0011267392,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,09:30:45,12345.67"
 
-	tick, err := parser.parseRow(validRow)
+	tick, err := parser.parseRow(validRow, 1)
 	if err != nil {
 		t.Fatalf("Failed to parse valid row: %v", err)
 	}
@@ -40,6 +40,9 @@ func TestParseRow(t *testing.T) {
 	if tick.Bid != 100.50 {
 		t.Errorf("Bid = %f, want %f", tick.Bid, 100.50)
 	}
+	if tick.LastTradedPrice != 100.60 {
+		t.Errorf("LastTradedPrice = %f, want %f", tick.LastTradedPrice, 100.60)
+	}
 	if tick.TotalVolume != 12345.67 {
 		t.Errorf("TotalVolume = %f, want %f", tick.TotalVolume, 12345.67)
 	}
@@ -59,13 +62,14 @@ func TestParseRowInvalidCases(t *testing.T) {
 		{"insufficient fields", "A,B,C"},
 		{"invalid Ask", "ID,E,08-11-2021,09:30:45.123,INVALID,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,09:30:45,12345.67"},
 		{"invalid Bid", "ID,E,08-11-2021,09:30:45.123,100.75,1000,INVALID,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,09:30:45,12345.67"},
-		{"invalid TotalVolume", "ID,E,08-11-2021,09:30:45.123,100.75,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,INVALID,12345.67"},
-		{"invalid TradingTime", "ID,E,08-11-2021,09:30:45.123,100.75,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,INVALID,12345.67"},
+		{"invalid LastTradedPrice", "ID,E,08-11-2021,09:30:45.123,100.75,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,INVALID,250,09:30:45,12345.67"},
+		{"invalid TotalVolume", "ID,E,08-11-2021,09:30:45.123,100.75,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,09:30:45,INVALID"},
+		{"invalid Date/Time", "ID,E,INVALID,09:30:45.123,100.75,1000,100.50,500,09:30:45,101.00,99.00,EUR,09:30:45,101.50,ISIN,0,99.50,98.00,09:30:00,100.00,1.00,100.60,250,09:30:45,12345.67"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tick, err := parser.parseRow(tt.row)
+			tick, err := parser.parseRow(tt.row, 1)
 			if err == nil {
 				if tick != nil {
 					ReleaseTick(tick)
@@ -179,7 +183,7 @@ func BenchmarkParseRow(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tick, err := parser.parseRow(row)
+		tick, err := parser.parseRow(row, i)
 		if err != nil {
 			b.Fatal(err)
 		}
