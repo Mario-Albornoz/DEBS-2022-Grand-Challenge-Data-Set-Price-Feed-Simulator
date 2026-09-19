@@ -10,8 +10,8 @@ publisher:
   workers: 8
 
 simulator:
-  mode: "fullspeed"
-  acceleration_factor: 1.0
+  mode: "accelerated"
+  acceleration_factor: 5.0
   data_dir: "data"
   file_pattern: "debs2022-gc-trading-day-*.csv"
 

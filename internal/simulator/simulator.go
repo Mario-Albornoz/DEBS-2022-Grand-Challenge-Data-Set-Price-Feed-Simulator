@@ -126,6 +126,9 @@ func (s *Simulator) Start(ctx context.Context) error {
 
 	close(parserChan)
 
+	// Cancel worker context to stop statsLogger and other workers
+	cancelWorkers()
+
 	// Wait for all workers to finish processing
 	wg.Wait()
 
@@ -208,6 +211,14 @@ func (s *Simulator) Stop() error {
 	var err error
 	s.stopOnce.Do(func() {
 		if s.anomaly != nil {
+			// Write manifest before closing
+			manifestPath := "data/injection_manifest.json"
+			if manifestErr := s.anomaly.WriteManifest(manifestPath); manifestErr != nil {
+				log.Printf("[WARN] Failed to write anomaly manifest: %v", manifestErr)
+			} else {
+				log.Printf("[INFO] Wrote anomaly manifest to %s", manifestPath)
+			}
+			
 			if closeErr := s.anomaly.Close(); closeErr != nil {
 				log.Printf("[WARN] Failed to close anomaly injector: %v", closeErr)
 			}

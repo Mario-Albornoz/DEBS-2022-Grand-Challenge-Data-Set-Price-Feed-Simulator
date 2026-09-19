@@ -13,8 +13,8 @@ publisher:
   workers: 4
 
 simulator:
-  mode: accelerated
-  acceleration_factor: 10
+  mode: fullspeed  # No timing delays - runs as fast as possible
+  acceleration_factor: 1000  # Not used in fullspeed mode
   data_dir: data
   file_pattern: "debs2022-gc-trading-day-*.csv"
 

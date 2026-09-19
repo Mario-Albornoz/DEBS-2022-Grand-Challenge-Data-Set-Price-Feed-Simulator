@@ -15,6 +15,9 @@
 
 # Registry persistence data
 data/
+backup/
+anomaly_log.csv
+test_anomaly_log.csv
 *.gob
 
 # IDE specific
