@@ -107,7 +107,7 @@ anomaly:
     strategies:
       - {type: price_spike, probability: 0.03, deviation_range: [2.0, 5.0]}
       - {type: stale_price, probability: 0.05, repeat_count: [3, 10]}
-      - {type: bid_ask_inversion, probability: 0.01}
+      - {type: price_deviation, probability: 0.01, deviation_range: [4.0, 8.0]}
 
   phase3_feed_silence:
     enabled: true
@@ -115,7 +115,7 @@ anomaly:
     window: {start: "14:30:00", end: "16:00:00"}
     blackout_seconds: 30
     instrument_ratio: 0.7
-    exchange_filter: ["XETRA"]
+    exchange_filter: ["ETR"]   # ID suffix (ETR, FR, NL), not the venue name
 
   phase4_point_failures:
     enabled: true
@@ -161,11 +161,14 @@ anomaly:
 - **Strategies**:
   - **Price Spike**: 3% probability, 2-5x deviation
   - **Stale Price**: 5% probability, repeated 3-10 times
-  - **Bid-Ask Inversion**: 1% probability
+  - **Price Deviation**: 1% probability, last price moved by 4-8 std-devs of recent
+    log returns (stays plausible; only anomalous in context)
+  - **Stale Price**: a run of 3-10 consecutive ticks of an instrument frozen at the
+    previous price (probability is the chance a run *starts*)
 
 ### Phase 3: Feed Silence (Collective)
 - **Window**: 14:30-16:00 on Monday (same day as Phase 1)
-- **Affects**: 70% of instruments on XETRA
+- **Affects**: 70% of instruments on ETR (Xetra)
 - **Behavior**: 30-second blackout per instrument
 - **Manifestation**: All ticks dropped during blackout
 
@@ -188,6 +191,42 @@ timestamp,instrument,phase,anomaly_type,detail
 2021-11-08 14:35:01,VOW3.ETR,phase3,feed_silence,blackout_start
 2021-11-10 11:12:33,BAYN.ETR,phase4,null_price,field=Bid
 ```
+
+### Episode ground truth (`anomaly_log_episodes.csv`)
+Written next to the tick log (`<log_file>_episodes.csv`, or `anomaly.episode_file`). One row
+per anomaly *episode*, in event time as epoch milliseconds. This is the file to evaluate
+against; the tick log above additionally records every dropped tick.
+
+```csv
+EpisodeID,Phase,AnomalyType,Exchange,InstrumentID,StartMs,EndMs,ObservedMs,ResumeMs,LastDeliveredMs,Detail,SecType
+```
+
+| Phase | Row | StartMs / EndMs | Other columns |
+|-------|-----|-----------------|---------------|
+| phase1 | one per instrument and day | window start / end | Detail: `ticks_seen`, `ticks_dropped`, rates |
+| phase2 spike, deviation | one per injected tick | tick time (equal) | ObservedMs = tick time |
+| phase2 stale_price | one per run | first / last tick of the run | Detail: `changed_ticks` = ticks whose true price differed from the frozen one |
+| phase3 | one per blackout | first dropped tick / scheduled end | `LastDeliveredMs` = last tick delivered before, `ResumeMs` = first tick delivered after (empty if none); Detail: `delivered_before` = ticks the instrument had delivered so far (a detector needs history to be warm) |
+| phase4 | one per injected tick | original tick time (equal) | `ObservedMs` = timestamp the downstream sees (differs for `timestamp_inversion`) |
+
+`SecType` is `E` (equity) or `I` (index). The injector does not filter on it, but the
+feed-handler only forwards equities, so evaluate against `SecType == "E"` rows. For
+`timestamp_inversion`, `Detail` includes `prev_ms`, the previous tick of the instrument:
+a rewind is only detectable by a per-instrument monotonicity check when
+`ObservedMs < prev_ms` (minus the validator's tolerance).
+
+Only equities (`SecType == "E"`) are injected and appear in the ground truth and in the
+instrument-day summary: index rows never reach the detector and are almost all "trades",
+so they would swallow the injection budget.
+
+Phase 1 and 3 rows and unfinished stale runs are written when the injector closes, so the
+file is not in chronological order; sort by `StartMs`. `EpisodeID` is a write-order counter.
+
+The tick log `anomaly_log.csv` now has millisecond timestamps and an extra
+`ObservedTimestamp` column (last column).
+
+On shutdown the injector warns if an enabled phase injected nothing (usually a
+`date_filter`/`window` that misses the data or an `exchange_filter` that matches no tick).
 
 ### Kafka Message Metadata
 Modified ticks include anomaly metadata:
@@ -220,7 +259,7 @@ Anomaly Injection Statistics:
   Phase 2 (Contextual Anomalies):
     price_spike:         412
     stale_price:         389
-    bid_ask_inversion:   104
+    price_deviation:     104
   
   Phase 3 (Feed Silence):
     Dropped: 2,111

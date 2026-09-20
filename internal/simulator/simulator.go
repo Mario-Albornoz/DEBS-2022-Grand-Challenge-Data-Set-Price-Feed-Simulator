@@ -160,7 +160,8 @@ func (s *Simulator) timingWorker(ctx context.Context, input <-chan *model.RawTic
 				return
 			}
 
-			atomic.AddUint64(&s.stats.TicksRead, 1)
+			// the run-wide sequence number of this tick (see model.RawTick.Seq)
+			tick.Seq = atomic.AddUint64(&s.stats.TicksRead, 1)
 
 			// Apply anomaly injection if enabled
 			if s.anomaly != nil {
@@ -247,7 +248,7 @@ func (s *Simulator) PrintStats() {
 	log.Printf("[INFO]   Current file:    %s", currentFile)
 	log.Printf("[INFO]   Ticks parsed:    %s", formatNumber(parserStats.RowsParsed))
 	log.Printf("[INFO]   Ticks sent:      %s", formatNumber(ticksRead))
-	log.Printf("[INFO]   Ticks published: %s", formatNumber(pubStats.Published))
+	log.Printf("[INFO]   Ticks published: %s (acknowledged by Kafka: %s)", formatNumber(pubStats.Published), formatNumber(pubStats.Delivered))
 	log.Printf("[INFO]   Throughput:      %s ticks/sec", formatNumber(uint64(throughput)))
 
 	// Error breakdown
@@ -302,15 +303,15 @@ func (s *Simulator) PrintStats() {
 			formatNumber(anomalyStats.Phase4Injected))
 		
 		if anomalyStats.Phase2Injected > 0 {
-			log.Printf("[INFO]       Contextual: Spikes=%s, Stale=%s, Inversions=%s",
+			log.Printf("[INFO]       Contextual: Spikes=%s, Stale=%s, Deviations=%s",
 				formatNumber(anomalyStats.PriceSpikes),
 				formatNumber(anomalyStats.StalePrices),
-				formatNumber(anomalyStats.BidAskInversions))
+				formatNumber(anomalyStats.PriceDeviations))
 		}
 		
 		if anomalyStats.Phase4Injected > 0 {
 			log.Printf("[INFO]       Point failures: Null=%s, Malformed=%s, TimeInv=%s",
-				formatNumber(anomalyStats.NullPrices),
+				formatNumber(anomalyStats.NullPrices+anomalyStats.ImplausiblePrices),
 				formatNumber(anomalyStats.MalformedISINs),
 				formatNumber(anomalyStats.TimestampInversions))
 		}

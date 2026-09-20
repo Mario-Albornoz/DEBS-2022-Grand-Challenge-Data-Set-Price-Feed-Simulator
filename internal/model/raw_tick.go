@@ -24,6 +24,12 @@ type RawTick struct {
 	Time        time.Time `json:"Time"`
 	
 	// Anomaly injection metadata (omitted when false/empty)
+	// Seq numbers the ticks of a run in the order they were read (1, 2, 3, ...). It rides
+	// through the feed-handler and the detector to the scores, so a score can be matched to
+	// the exact injected message: an instrument's messages often share one millisecond, so
+	// (instrument, time) cannot tell them apart.
+	Seq uint64 `json:"Seq"`
+
 	AnomalyInjected bool   `json:"anomaly_injected,omitempty"`
 	AnomalyType     string `json:"anomaly_type,omitempty"`
 }

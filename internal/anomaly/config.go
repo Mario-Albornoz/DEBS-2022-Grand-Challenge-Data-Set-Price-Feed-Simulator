@@ -10,6 +10,14 @@ type Config struct {
 	Seed    int64 `yaml:"seed"`
 	LogFile string `yaml:"log_file"`
 
+	// EpisodeFile receives the episode-level ground truth (one row per anomaly
+	// episode). When empty it defaults to "<log_file without extension>_episodes.csv".
+	EpisodeFile string `yaml:"episode_file,omitempty"`
+	// InstrumentFile receives each instrument's rows and trades per day (before any
+	// injection), which the evaluation stratifies by. Defaults to
+	// "<log_file without extension>_instruments.csv".
+	InstrumentFile string `yaml:"instrument_file,omitempty"`
+
 	Phase1 Phase1Config `yaml:"phase1_tick_rate_decline"`
 	Phase2 Phase2Config `yaml:"phase2_contextual_anomalies"`
 	Phase3 Phase3Config `yaml:"phase3_feed_silence"`
@@ -36,6 +44,7 @@ type Phase2Config struct {
 	DateFilter         []string   `yaml:"date_filter,omitempty"` // ["09-11-2021"]
 	Window             TimeWindow `yaml:"window"`
 	ContextWindowHours float64    `yaml:"context_window_hours"` // Hours of market history
+	Quota              QuotaConfig `yaml:"per_instrument_quota"`
 	
 	Strategies []ContextualStrategy `yaml:"strategies"`
 }
@@ -44,8 +53,15 @@ type ContextualStrategy struct {
 	Type        string    `yaml:"type"`
 	Probability float64   `yaml:"probability"` // 0.03 = 3%
 	
-	DeviationRange []float64 `yaml:"deviation_range,omitempty"` // [2.0, 5.0] = 2x-5x multiplier
-	RepeatCount    []int     `yaml:"repeat_count,omitempty"`    // [3, 10] times
+	// price_spike: [2.0, 5.0] = 2x-5x multiplier of the recent average price.
+	// price_deviation: [4.0, 8.0] = std-devs of recent log returns (default [4, 8]).
+	DeviationRange []float64 `yaml:"deviation_range,omitempty"`
+	// stale_price: the previous price is repeated for this many consecutive ticks
+	// of the instrument (default [3, 10]).
+	RepeatCount []int `yaml:"repeat_count,omitempty"`
+	// price_deviation: floor for the return std-dev so flat instruments still get a
+	// visible deviation (default 0.002 = 0.2%).
+	MinRelativeDeviation float64 `yaml:"min_relative_deviation,omitempty"`
 }
 
 type Phase3Config struct {
@@ -62,13 +78,17 @@ type Phase4Config struct {
 	DateFilter []string               `yaml:"date_filter,omitempty"` // ["10-11-2021"]
 	Window     TimeWindow             `yaml:"window"`
 	Strategies []PointFailureStrategy `yaml:"strategies"`
+	Quota      QuotaConfig            `yaml:"per_instrument_quota"` // applies to implausible_price
 }
 
 type PointFailureStrategy struct {
 	Type        string   `yaml:"type"`
 	Probability float64  `yaml:"probability"` // 0.02 = 2%
 	
-	Field         []string `yaml:"field,omitempty"`
+	Field []string `yaml:"field,omitempty"`
+	// implausible_price: the last price is multiplied or divided by a factor in this
+	// range, e.g. [10, 100] (default [10, 100]).
+	MultiplierRange []float64 `yaml:"multiplier_range,omitempty"`
 	Corruption    []string `yaml:"corruption,omitempty"`
 	RewindSeconds []int    `yaml:"rewind_seconds,omitempty"` // [1, 300] seconds
 }
@@ -112,8 +132,12 @@ func DefaultConfig() Config {
 					RepeatCount: []int{3, 10},
 				},
 				{
-					Type:        "bid_ask_inversion",
-					Probability: 0.01,
+					// Plausible-looking last-price deviation. Bid/Ask are not
+					// used by the detector (trade-only data), so quote-based
+					// injections cannot be evaluated.
+					Type:           "price_deviation",
+					Probability:    0.01,
+					DeviationRange: []float64{4.0, 8.0},
 				},
 			},
 		},
@@ -127,7 +151,8 @@ func DefaultConfig() Config {
 			},
 			BlackoutSeconds: 30,
 			InstrumentRatio: 0.7,
-			ExchangeFilter:  []string{"XETRA"},
+			// Must match model.ExtractExchange(ID) (e.g. "ETR"), not the venue name.
+			ExchangeFilter: []string{"ETR"},
 		},
 		
 		Phase4: Phase4Config{
@@ -139,9 +164,9 @@ func DefaultConfig() Config {
 			},
 			Strategies: []PointFailureStrategy{
 				{
-					Type:        "null_price",
-					Probability: 0.02,
-					Field:       []string{"Bid", "Ask", "both"},
+					Type:            "implausible_price",
+					Probability:     0.02,
+					MultiplierRange: []float64{10, 100},
 				},
 				{
 					Type:        "malformed_isin",
@@ -214,6 +239,109 @@ func (c Config) Validate() error {
 		}
 	}
 	
+	return c.validateStrategies()
+}
+
+// validateStrategies rejects unknown strategy types and malformed parameters so a
+// stale or misspelled config fails at startup instead of silently injecting nothing.
+func (c Config) validateStrategies() error {
+	if err := c.Phase2.Quota.validate("Phase2"); err != nil {
+		return err
+	}
+	if err := c.Phase4.Quota.validate("Phase4"); err != nil {
+		return err
+	}
+
+	checkRange := func(name string, lo, hi float64) error {
+		if lo > hi {
+			return fmt.Errorf("%s: range [%v, %v] has min > max", name, lo, hi)
+		}
+		return nil
+	}
+
+	if c.Phase2.Enabled {
+		for _, s := range c.Phase2.Strategies {
+			if s.Probability < 0 || s.Probability > 1 {
+				return fmt.Errorf("Phase2 %s: probability %v not in [0, 1]", s.Type, s.Probability)
+			}
+			switch s.Type {
+			case "price_spike":
+				if len(s.DeviationRange) != 2 {
+					return fmt.Errorf("Phase2 price_spike: deviation_range must have 2 values")
+				}
+				if err := checkRange("Phase2 price_spike deviation_range", s.DeviationRange[0], s.DeviationRange[1]); err != nil {
+					return err
+				}
+			case "price_deviation":
+				if len(s.DeviationRange) != 0 {
+					if len(s.DeviationRange) != 2 {
+						return fmt.Errorf("Phase2 price_deviation: deviation_range must have 2 values")
+					}
+					if err := checkRange("Phase2 price_deviation deviation_range", s.DeviationRange[0], s.DeviationRange[1]); err != nil {
+						return err
+					}
+				}
+			case "stale_price":
+				if len(s.RepeatCount) != 0 {
+					if len(s.RepeatCount) != 2 || s.RepeatCount[0] < 1 {
+						return fmt.Errorf("Phase2 stale_price: repeat_count must be [min>=1, max]")
+					}
+					if err := checkRange("Phase2 stale_price repeat_count", float64(s.RepeatCount[0]), float64(s.RepeatCount[1])); err != nil {
+						return err
+					}
+				}
+			default:
+				return fmt.Errorf("Phase2: unknown strategy type %q (valid: price_spike, price_deviation, stale_price)", s.Type)
+			}
+		}
+	}
+
+	if c.Phase4.Enabled {
+		for _, s := range c.Phase4.Strategies {
+			if s.Probability < 0 || s.Probability > 1 {
+				return fmt.Errorf("Phase4 %s: probability %v not in [0, 1]", s.Type, s.Probability)
+			}
+			switch s.Type {
+			case "null_price":
+				if len(s.Field) == 0 {
+					return fmt.Errorf("Phase4 null_price: field must list at least one of Last, Bid, Ask, both")
+				}
+				for _, f := range s.Field {
+					if f != "Last" && f != "Bid" && f != "Ask" && f != "both" {
+						return fmt.Errorf("Phase4 null_price: unknown field %q (valid: Last, Bid, Ask, both)", f)
+					}
+				}
+			case "implausible_price":
+				if len(s.MultiplierRange) != 0 {
+					if len(s.MultiplierRange) != 2 || s.MultiplierRange[0] <= 1 {
+						return fmt.Errorf("Phase4 implausible_price: multiplier_range must be [min>1, max]")
+					}
+					if err := checkRange("Phase4 implausible_price multiplier_range", s.MultiplierRange[0], s.MultiplierRange[1]); err != nil {
+						return err
+					}
+				}
+			case "malformed_isin":
+				if len(s.Corruption) == 0 {
+					return fmt.Errorf("Phase4 malformed_isin: corruption must list at least one of truncate, random_chars")
+				}
+				for _, k := range s.Corruption {
+					if k != "truncate" && k != "random_chars" {
+						return fmt.Errorf("Phase4 malformed_isin: unknown corruption %q", k)
+					}
+				}
+			case "timestamp_inversion":
+				if len(s.RewindSeconds) != 2 || s.RewindSeconds[0] < 0 {
+					return fmt.Errorf("Phase4 timestamp_inversion: rewind_seconds must be [min>=0, max]")
+				}
+				if err := checkRange("Phase4 timestamp_inversion rewind_seconds", float64(s.RewindSeconds[0]), float64(s.RewindSeconds[1])); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("Phase4: unknown strategy type %q (valid: null_price, implausible_price, malformed_isin, timestamp_inversion)", s.Type)
+			}
+		}
+	}
+
 	return nil
 }
 

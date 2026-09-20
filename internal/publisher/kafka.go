@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"sync/atomic"
 	"time"
 
@@ -15,12 +16,19 @@ import (
 )
 
 type PublisherStats struct {
-	Published uint64
-	Failed    uint64
+	Published uint64 // messages handed to the writer
+	Delivered uint64 // messages Kafka acknowledged (the writer is asynchronous)
+	Failed    uint64 // messages that could not be marshalled, enqueued or delivered
+}
+
+// messageWriter is the part of kafka.Writer the publisher uses.
+type messageWriter interface {
+	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
+	Close() error
 }
 
 type KafkaPublisher struct {
-	writer *kafka.Writer
+	writer messageWriter
 	config *config.Config
 	stats  PublisherStats
 }
@@ -52,21 +60,77 @@ func NewKafkaPublisher(cfg *config.Config) (*KafkaPublisher, error) {
 		Async:        true, // Enable async writes for much higher throughput
 	}
 
-	return &KafkaPublisher{
+	p := &KafkaPublisher{
 		writer: writer,
 		config: cfg,
-	}, nil
+	}
+
+	// The writer is asynchronous, so WriteMessages never reports a delivery error; only
+	// this callback does. Without it a lost message is invisible.
+	writer.Completion = func(messages []kafka.Message, err error) {
+		if err != nil {
+			atomic.AddUint64(&p.stats.Failed, uint64(len(messages)))
+			return
+		}
+		atomic.AddUint64(&p.stats.Delivered, uint64(len(messages)))
+	}
+
+	return p, nil
 }
 
 // Start begins publishing messages from the input channel using multiple workers.
 // Blocks until context is cancelled or channel is closed.
+//
+// The messages of one instrument must reach Kafka in the order they were produced: the
+// feed-handler's timestamp check, timing features and silence detection all assume it.
+// Workers that pull from a shared channel break that (two consecutive ticks of one
+// instrument can be picked up by different workers and enqueued in either order), so
+// each tick is routed to the worker that owns its instrument, and every worker publishes
+// its queue sequentially.
 func (p *KafkaPublisher) Start(ctx context.Context, input <-chan *model.RawTick) error {
-	for i := 0; i < p.config.Publisher.Workers; i++ {
-		go p.publishWorker(ctx, input)
+	workers := p.config.Publisher.Workers
+	if workers < 1 {
+		workers = 1
 	}
+
+	queues := make([]chan *model.RawTick, workers)
+	for i := range queues {
+		queues[i] = make(chan *model.RawTick, 1024)
+		go p.publishWorker(ctx, queues[i])
+	}
+
+	go func() {
+		defer func() {
+			for _, q := range queues {
+				close(q)
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case tick, ok := <-input:
+				if !ok {
+					return
+				}
+				select {
+				case queues[shardOf(tick.ID, workers)] <- tick:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
 
 	<-ctx.Done()
 	return p.Close()
+}
+
+// shardOf maps an instrument to the worker that publishes it.
+func shardOf(id string, workers int) int {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return int(h.Sum32() % uint32(workers))
 }
 
 func (p *KafkaPublisher) publishWorker(ctx context.Context, input <-chan *model.RawTick) {
@@ -112,6 +176,7 @@ func (p *KafkaPublisher) Close() error {
 func (p *KafkaPublisher) GetStats() PublisherStats {
 	return PublisherStats{
 		Published: atomic.LoadUint64(&p.stats.Published),
+		Delivered: atomic.LoadUint64(&p.stats.Delivered),
 		Failed:    atomic.LoadUint64(&p.stats.Failed),
 	}
 }

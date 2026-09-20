@@ -17,7 +17,12 @@
 data/
 backup/
 anomaly_log.csv
+anomaly_log_episodes.csv
+anomaly_log_instruments.csv
 test_anomaly_log.csv
+test_anomaly_log_episodes.csv
+test_anomaly_log_instruments.csv
+anomaly_log_instruments.csv
 *.gob
 
 # IDE specific
