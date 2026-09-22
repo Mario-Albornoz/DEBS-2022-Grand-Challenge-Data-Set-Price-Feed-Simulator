@@ -28,14 +28,6 @@ logging:
   stats_interval_sec: 5
   level: info
 
-# ===== 3-DAY ANOMALY EXPERIMENT =====
-# Day 08 (Monday):   Phase 1 (morning) + Phase 3 (afternoon)
-# Day 09 (Tuesday):  Phase 2 (full day)
-# Day 10 (Wednesday): Phase 4 (full day)
-# Day 11 (Thursday): Baseline (no anomalies)
-# Day 12 (Friday):   Baseline (no anomalies)
-
-#TODO: move anomaly injection one day to have a baseline and for all the instruments to be warmed up
 anomaly:
   enabled: true
   seed: 42
@@ -44,10 +36,10 @@ anomaly:
   # Phase 1: Gradual Tick Rate Decline
   phase1_tick_rate_decline:
     enabled: true
-    date_filter: ["09-11-2021"]
+    date_filter: ["11-11-2021"]
     window:
-      start: "09:30:00"
-      end:   "14:00:00"
+      start: "14:00:00"
+      end:   "16:00:00"
     decline_pattern: linear
     initial_rate: 1.0      # 1.0 = 100%
     final_rate: 0.3        # 0.3 = 30%
@@ -62,30 +54,19 @@ anomaly:
       end:   "15:00:00"
     context_window_hours: 1.0  # 1.0 = last 1 hour
 
-    # Probabilities are per TRADE row (price anomalies are injected on trades only; about
-    # 4% of rows are trades). They are deliberately low: injected outliers feed the
-    # detector's own adaptive statistics, and real faults are rare. With about 1.25M trade
-    # rows in this window a day, these give roughly 3,700 episodes of each spike/deviation
-    # type, about 370 of which are scored (the worker scores 1 vector in 10).
     strategies:
       - type: price_spike
         probability: 0.003          # 0.3% of trade rows
         deviation_range: [2.0, 5.0] # [2.0, 5.0] = 2x-5x multiplier
 
-      # probability is the chance a run STARTS on a trade; each run then freezes the price
-      # for repeat_count consecutive trades of that instrument (~6.5 on average), so about
-      # 6.5x this share of trades end up frozen (0.6%).
       - type: stale_price
         probability: 0.001          # 0.1% run starts
         repeat_count: [3, 10]       # [3, 10] times
 
-      # Last-price deviation of k std-devs of recent log returns (replaces bid_ask_inversion:
-      # the detector only sees last traded price). Needs 10+ trade returns in the past hour.
       - type: price_deviation
         probability: 0.003          # 0.3% of trade rows
         deviation_range: [4.0, 8.0] # [4.0, 8.0] = std-devs of recent returns
 
-    # Every instrument gets a share of the anomalies, not just the busiest ones: an
     # instrument's per-row probability is raised so it expects about min_episodes episodes
     # a day (never below the probabilities above, never above max_row_probability). It uses
     # the instrument's trade count in this window on the previous day of the same run.
@@ -94,51 +75,32 @@ anomaly:
       min_episodes: 3
       max_row_probability: 0.25
 
-  # Phase 3: Feed Silence
   phase3_feed_silence:
     enabled: true
     date_filter: ["10-11-2021"]
     window:
       start: "15:30:00"
       end:   "16:00:00"
-    blackout_seconds: 120        # 120 seconds per instrument
-    instrument_ratio: 0.7       # 0.7 = 70%
-    # Matches the ID suffix (ETR, FR, NL), not the venue name; "XETRA" matches nothing.
+    blackout_seconds: 120        
+    instrument_ratio: 0.7       
     exchange_filter: ["ETR"]
 
-  # Phase 4: Sudden Point Failures
   phase4_point_failures:
     enabled: true
     date_filter: ["11-11-2021"]
     window:
       start: "09:30:00"
-      end:   "15:30:00"
+      end:   "13:30:00"
 
     strategies:
-      # A price no real move produces: the last price of a trade row is multiplied or
-      # divided by a factor in [10, 100]. (null_price is not used: with the last traded
-      # price carried forward through quote-only rows, a trade whose price is nulled is
-      # indistinguishable from a quote update, so it could never be detected.)
       - type: implausible_price
-        probability: 0.003         # 0.3% of trade rows
+        probability: 0.003         
         multiplier_range: [10, 100]
 
-      # malformed_isin is left out of the experiment on purpose: the DEBS data has no ISIN
-      # (the field is empty in every equity row), so "truncate" changes nothing and
-      # "random_chars" would only write junk into an empty field. The strategy remains
-      # available in the injector:
-      #   - type: malformed_isin
-      #     probability: 0.01
-      #     corruption: ["truncate", "random_chars"]
-
-      # Per ROW (all equity rows, about 28M in this window: roughly 28,000 rewinds a day).
-      # A rewind is only visible when it lands before the instrument's previous message,
-      # so it is mostly detectable on busy instruments.
       - type: timestamp_inversion
-        probability: 0.001         # 0.1% of rows
-        rewind_seconds: [1, 300]   # [1, 300] = 1-300 seconds
+        probability: 0.001         
+        rewind_seconds: [1, 300]   
 
-    # Same per-instrument quota for the price anomaly above (not for timestamp rewinds).
     per_instrument_quota:
       min_episodes: 3
       max_row_probability: 0.25
