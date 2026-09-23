@@ -34,12 +34,14 @@ anomaly:
   log_file: anomaly_log.csv
 
   # Phase 1: Gradual Tick Rate Decline
+  # Runs before Phase 4 on the same day, so it starts on clean per-instrument statistics
+  # (after Phase 4 the 10-100x prices would still be in the variances and CUSUMs).
   phase1_tick_rate_decline:
     enabled: true
     date_filter: ["11-11-2021"]
     window:
-      start: "14:00:00"
-      end:   "16:00:00"
+      start: "09:30:00"
+      end:   "11:30:00"
     decline_pattern: linear
     initial_rate: 1.0      # 1.0 = 100%
     final_rate: 0.3        # 0.3 = 30%
@@ -89,8 +91,8 @@ anomaly:
     enabled: true
     date_filter: ["11-11-2021"]
     window:
-      start: "09:30:00"
-      end:   "13:30:00"
+      start: "12:00:00"   # after Phase 1 (09:30-11:30); same 4-hour length as before
+      end:   "16:00:00"
 
     strategies:
       - type: implausible_price
