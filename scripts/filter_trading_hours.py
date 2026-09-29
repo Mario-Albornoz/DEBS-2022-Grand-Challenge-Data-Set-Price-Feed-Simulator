@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Filter CSV files to only include trading hours (09:30-16:00).
-Optimized version with progress bar.
-"""
 
 import sys
 import time
@@ -11,9 +7,7 @@ from pathlib import Path
 
 
 def parse_time(time_str):
-    """Parse time string from CSV (format: HH:MM:SS.mmm)"""
     try:
-        # Just extract HH:MM for speed
         hour, minute = time_str.split(":")[:2]
         return int(hour), int(minute)
     except:
@@ -21,7 +15,6 @@ def parse_time(time_str):
 
 
 def is_trading_hours_fast(time_str):
-    """Fast check if time is within trading hours (09:30-16:00)"""
     hour, minute = parse_time(time_str)
     if hour is None:
         return False
@@ -38,8 +31,6 @@ def is_trading_hours_fast(time_str):
 
 
 def filter_file(input_path, output_path):
-    """Filter a single CSV file to trading hours only"""
-
     file_size = input_path.stat().st_size
     file_size_mb = file_size / (1024 * 1024)
 

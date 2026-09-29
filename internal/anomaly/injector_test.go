@@ -24,7 +24,7 @@ func TestAnomalyInjectorDisabled(t *testing.T) {
 func TestAnomalyInjectorCreation(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
-	cfg.LogFile = "" // Disable file logging for test
+	cfg.LogFile = ""
 
 	inj, err := NewInjector(cfg)
 	if err != nil {
@@ -49,8 +49,8 @@ func TestPhase1TickRateDecline(t *testing.T) {
 	cfg.Phase1.Enabled = true
 	cfg.Phase1.Window = TimeWindow{Start: "09:00:00", End: "10:00:00"}
 	cfg.Phase1.InitialRate = 1.0
-	cfg.Phase1.FinalRate = 0.0  // Drop all by end
-	cfg.Phase1.InstrumentRatio = 1.0 // All instruments
+	cfg.Phase1.FinalRate = 0.0
+	cfg.Phase1.InstrumentRatio = 1.0
 
 	inj, err := NewInjector(cfg)
 	if err != nil {
@@ -58,7 +58,6 @@ func TestPhase1TickRateDecline(t *testing.T) {
 	}
 	defer inj.Close()
 
-	// Test tick at start of window (should mostly pass)
 	tick1 := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
@@ -76,11 +75,10 @@ func TestPhase1TickRateDecline(t *testing.T) {
 		}
 	}
 
-	if passCount < 80 { // At least 80% should pass at start
+	if passCount < 80 {
 		t.Errorf("Expected ~100%% pass rate at start, got %d%%", passCount)
 	}
 
-	// Test tick at end of window (should mostly drop)
 	tick2 := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
@@ -98,7 +96,7 @@ func TestPhase1TickRateDecline(t *testing.T) {
 		}
 	}
 
-	if dropCount < 80 { // At least 80% should drop at end
+	if dropCount < 80 {
 		t.Errorf("Expected ~100%% drop rate at end, got %d%%", dropCount)
 	}
 }
@@ -174,7 +172,7 @@ func TestPhase3FeedSilence(t *testing.T) {
 	cfg.Phase3.Window = TimeWindow{Start: "09:00:00", End: "10:00:00"}
 	cfg.Phase3.BlackoutSeconds = 10
 	cfg.Phase3.InstrumentRatio = 1.0
-	cfg.Phase3.ExchangeFilter = []string{} // No filter for test
+	cfg.Phase3.ExchangeFilter = []string{}
 
 	inj, err := NewInjector(cfg)
 	if err != nil {
@@ -184,7 +182,6 @@ func TestPhase3FeedSilence(t *testing.T) {
 
 	baseTime := time.Date(2021, 11, 8, 9, 30, 0, 0, time.UTC)
 
-	// First tick should trigger blackout
 	tick1 := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
@@ -196,7 +193,6 @@ func TestPhase3FeedSilence(t *testing.T) {
 		t.Error("First tick should be dropped (blackout start)")
 	}
 
-	// Tick 5 seconds later should still be dropped (within 10s blackout)
 	tick2 := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
@@ -208,7 +204,6 @@ func TestPhase3FeedSilence(t *testing.T) {
 		t.Error("Tick within blackout should be dropped")
 	}
 
-	// Tick 11 seconds later should pass (blackout expired)
 	tick3 := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
@@ -219,14 +214,13 @@ func TestPhase3FeedSilence(t *testing.T) {
 	if dropped3 {
 		t.Error("Tick after blackout should not be dropped")
 	}
-	
-	// Test with different instrument to verify independence
+
 	tick4 := &model.RawTick{
 		ID:          "OTHER.FR",
 		Exchange:    "FR",
 		TradingTime: baseTime.Add(1 * time.Second),
 	}
-	
+
 	_, dropped4, _ := inj.ProcessTick(tick4)
 	if !dropped4 {
 		t.Error("Different instrument should also be blacklisted")
@@ -293,11 +287,11 @@ func TestTimeWindowChecking(t *testing.T) {
 		time     time.Time
 		expected bool
 	}{
-		{time.Date(2021, 11, 8, 9, 0, 0, 0, time.UTC), false},  // Before
-		{time.Date(2021, 11, 8, 9, 30, 0, 0, time.UTC), true},  // Start
-		{time.Date(2021, 11, 8, 10, 0, 0, 0, time.UTC), true},  // Middle
-		{time.Date(2021, 11, 8, 10, 30, 0, 0, time.UTC), true},  // End
-		{time.Date(2021, 11, 8, 11, 0, 0, 0, time.UTC), false}, // After
+		{time.Date(2021, 11, 8, 9, 0, 0, 0, time.UTC), false},
+		{time.Date(2021, 11, 8, 9, 30, 0, 0, time.UTC), true},
+		{time.Date(2021, 11, 8, 10, 0, 0, 0, time.UTC), true},
+		{time.Date(2021, 11, 8, 10, 30, 0, 0, time.UTC), true},
+		{time.Date(2021, 11, 8, 11, 0, 0, 0, time.UTC), false},
 	}
 
 	for _, tc := range testCases {
@@ -306,7 +300,7 @@ func TestTimeWindowChecking(t *testing.T) {
 			t.Errorf("Error checking window for %v: %v", tc.time, err)
 		}
 		if inWindow != tc.expected {
-			t.Errorf("Time %v: expected %v, got %v", 
+			t.Errorf("Time %v: expected %v, got %v",
 				tc.time.Format("15:04:05"), tc.expected, inWindow)
 		}
 	}
@@ -315,17 +309,17 @@ func TestTimeWindowChecking(t *testing.T) {
 func TestSequentialValidation(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
-	
+
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Sequential default config should be valid: %v", err)
 	}
-	
+
 	overlappingCfg := DefaultConfig()
 	overlappingCfg.Enabled = true
 	overlappingCfg.Phase2.DateFilter = []string{"08-11-2021"}
 	overlappingCfg.Phase2.Window.Start = "10:00:00"
 	overlappingCfg.Phase2.Window.End = "15:00:00"
-	
+
 	if err := overlappingCfg.Validate(); err == nil {
 		t.Error("Overlapping phases on same date should fail validation")
 	} else {
@@ -342,28 +336,28 @@ func TestDateFiltering(t *testing.T) {
 	cfg.Phase2.Enabled = false
 	cfg.Phase3.Enabled = false
 	cfg.Phase4.Enabled = false
-	
+
 	inj, err := NewInjector(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create injector: %v", err)
 	}
 	defer inj.Close()
-	
+
 	monday := time.Date(2021, 11, 8, 9, 45, 0, 0, time.UTC)
 	tuesday := time.Date(2021, 11, 9, 9, 45, 0, 0, time.UTC)
-	
+
 	tickMonday := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
 		TradingTime: monday,
 	}
-	
+
 	tickTuesday := &model.RawTick{
 		ID:          "TEST.ETR",
 		Exchange:    "ETR",
 		TradingTime: tuesday,
 	}
-	
+
 	mondayDropped := 0
 	for i := 0; i < 100; i++ {
 		_, dropped, _ := inj.ProcessTick(tickMonday)
@@ -371,7 +365,7 @@ func TestDateFiltering(t *testing.T) {
 			mondayDropped++
 		}
 	}
-	
+
 	tuesdayDropped := 0
 	for i := 0; i < 100; i++ {
 		_, dropped, _ := inj.ProcessTick(tickTuesday)
@@ -379,16 +373,15 @@ func TestDateFiltering(t *testing.T) {
 			tuesdayDropped++
 		}
 	}
-	
+
 	if mondayDropped == 0 {
 		t.Error("Expected some ticks dropped on Monday (date filter match)")
 	}
-	
+
 	if tuesdayDropped > 0 {
 		t.Errorf("Expected NO ticks dropped on Tuesday (date filter mismatch), got %d", tuesdayDropped)
 	}
-	
+
 	t.Logf("Monday (08-11-2021): %d/100 dropped ✓", mondayDropped)
 	t.Logf("Tuesday (09-11-2021): %d/100 dropped ✓", tuesdayDropped)
 }
-

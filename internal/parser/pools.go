@@ -1,4 +1,3 @@
-// Package parser provides memory pools for efficient object reuse.
 package parser
 
 import (
@@ -29,34 +28,28 @@ var (
 	}
 )
 
-// AcquireTick gets a RawTick from the pool.
 func AcquireTick() *model.RawTick {
 	return tickPool.Get().(*model.RawTick)
 }
 
-// ReleaseTick returns a RawTick to the pool for reuse.
 func ReleaseTick(tick *model.RawTick) {
 	*tick = model.RawTick{}
 	tickPool.Put(tick)
 }
 
-// AcquireBuffer gets a bytes.Buffer from the pool.
 func AcquireBuffer() *bytes.Buffer {
 	return bufferPool.Get().(*bytes.Buffer)
 }
 
-// ReleaseBuffer returns a bytes.Buffer to the pool for reuse.
 func ReleaseBuffer(buf *bytes.Buffer) {
 	buf.Reset()
 	bufferPool.Put(buf)
 }
 
-// AcquireByteSlice gets a byte slice from the pool.
 func AcquireByteSlice() *[]byte {
 	return byteSlicePool.Get().(*[]byte)
 }
 
-// ReleaseByteSlice returns a byte slice to the pool for reuse.
 func ReleaseByteSlice(slice *[]byte) {
 	*slice = (*slice)[:0]
 	byteSlicePool.Put(slice)

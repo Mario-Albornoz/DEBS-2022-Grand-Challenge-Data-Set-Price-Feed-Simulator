@@ -13,8 +13,6 @@ import (
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
 )
 
-// baseConfig returns a config with every phase disabled and file logging pointed
-// at a temp dir. The caller sets the phase's fields.
 func baseConfig(t *testing.T) (Config, string) {
 	t.Helper()
 	cfg := DefaultConfig()
@@ -29,7 +27,6 @@ func baseConfig(t *testing.T) (Config, string) {
 	return cfg, cfg.EpisodeFile
 }
 
-// readEpisodes loads the episode file as header-keyed rows.
 func readEpisodes(t *testing.T, path string) []map[string]string {
 	t.Helper()
 	f, err := os.Open(path)
@@ -76,7 +73,7 @@ func TestPhase2PriceDeviationOnlyTouchesLastPrice(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		price := 100.0
 		if i%2 == 1 {
-			price = 100.5 // gives the return history a non-zero volatility
+			price = 100.5
 		}
 		tick := &model.RawTick{
 			ID: "TEST.ETR", Exchange: "ETR",
@@ -97,7 +94,6 @@ func TestPhase2PriceDeviationOnlyTouchesLastPrice(t *testing.T) {
 	if last.Bid != 99.0 || last.Ask != 101.0 {
 		t.Errorf("Bid/Ask must be untouched, got %.2f/%.2f", last.Bid, last.Ask)
 	}
-	// 5 sigma with sigma floored at 0.2% is at least a 1% move, in either direction.
 	if move := math.Abs(math.Log(last.LastTradedPrice / 100.5)); move < 5*0.002*0.99 {
 		t.Errorf("last price barely moved: %.6f", last.LastTradedPrice)
 	}
@@ -151,9 +147,6 @@ func TestPhase2StaleRunIsOneEpisode(t *testing.T) {
 	if out[0].AnomalyInjected {
 		t.Error("tick 0 has no history and must be untouched")
 	}
-	// Injection starts once two ticks of history exist: runs are ticks 1-3 and 4-6.
-	// Each run freezes the price of the tick before it (the true price, not an
-	// injected one).
 	for i := 1; i <= 3; i++ {
 		if out[i].LastTradedPrice != 100.0 {
 			t.Errorf("tick %d: expected frozen price 100, got %.2f", i, out[i].LastTradedPrice)
@@ -183,7 +176,7 @@ func TestPhaseSelectionIsIndependentPerPhase(t *testing.T) {
 	cfg.Phase1.Enabled = true
 	cfg.Phase1.DateFilter = []string{"08-11-2021"}
 	cfg.Phase1.Window = TimeWindow{Start: "09:00:00", End: "10:00:00"}
-	cfg.Phase1.InstrumentRatio = 0.0 // nobody selected for phase 1
+	cfg.Phase1.InstrumentRatio = 0.0
 	cfg.Phase3.Enabled = true
 	cfg.Phase3.DateFilter = []string{"09-11-2021"}
 	cfg.Phase3.Window = TimeWindow{Start: "09:00:00", End: "10:00:00"}
@@ -196,7 +189,6 @@ func TestPhaseSelectionIsIndependentPerPhase(t *testing.T) {
 	}
 	defer inj.Close()
 
-	// Phase 1 evaluates (and rejects) the instrument first...
 	_, dropped, _ := inj.ProcessTick(&model.RawTick{
 		ID: "TEST.ETR", Exchange: "ETR",
 		TradingTime: time.Date(2021, 11, 8, 9, 30, 0, 0, time.UTC),
@@ -205,7 +197,6 @@ func TestPhaseSelectionIsIndependentPerPhase(t *testing.T) {
 		t.Fatal("phase 1 with ratio 0 must not drop")
 	}
 
-	// ...which must not decide phase 3's selection.
 	_, dropped, _ = inj.ProcessTick(&model.RawTick{
 		ID: "TEST.ETR", Exchange: "ETR",
 		TradingTime: time.Date(2021, 11, 9, 9, 30, 0, 0, time.UTC),
@@ -232,7 +223,6 @@ func TestPhase3EpisodeGroundTruth(t *testing.T) {
 	day := time.Date(2021, 11, 8, 9, 29, 58, 0, time.UTC)
 	at := func(sec int) time.Time { return day.Add(time.Duration(sec) * time.Second) }
 	send := func(id, ex string, tm time.Time) bool {
-		// the update time is the whole second of the (millisecond) trading time
 		_, dropped, err := inj.ProcessTick(&model.RawTick{ID: id, Exchange: ex, TradingTime: tm.Add(300 * time.Millisecond), Time: tm})
 		if err != nil {
 			t.Fatal(err)
@@ -240,19 +230,19 @@ func TestPhase3EpisodeGroundTruth(t *testing.T) {
 		return dropped
 	}
 
-	if send("A.ETR", "ETR", at(0)) { // 09:29:58, before the window
+	if send("A.ETR", "ETR", at(0)) {
 		t.Fatal("tick before window must be delivered")
 	}
-	if !send("A.ETR", "ETR", at(3)) { // 09:30:01, starts the blackout
+	if !send("A.ETR", "ETR", at(3)) {
 		t.Fatal("first tick in window should start the blackout")
 	}
-	if !send("A.ETR", "ETR", at(7)) { // 09:30:05
+	if !send("A.ETR", "ETR", at(7)) {
 		t.Fatal("tick inside the blackout should be dropped")
 	}
-	if send("A.ETR", "ETR", at(14)) { // 09:30:12, after 09:30:11
+	if send("A.ETR", "ETR", at(14)) {
 		t.Fatal("tick after the blackout should be delivered")
 	}
-	if send("B.FR", "FR", at(3)) { // exchange filter excludes it
+	if send("B.FR", "FR", at(3)) {
 		t.Fatal("instrument on another exchange must not be dropped")
 	}
 	inj.Close()
@@ -263,10 +253,9 @@ func TestPhase3EpisodeGroundTruth(t *testing.T) {
 	}
 	ep := episodes[0]
 	want := map[string]string{
-		"Phase":        "phase3",
-		"InstrumentID": "A.ETR",
-		"Exchange":     "ETR",
-		// TradingTime columns carry the 300 ms the test gives every tick
+		"Phase":           "phase3",
+		"InstrumentID":    "A.ETR",
+		"Exchange":        "ETR",
 		"StartMs":         ms(at(3).Add(300 * time.Millisecond)),
 		"EndMs":           ms(at(13).Add(300 * time.Millisecond)),
 		"LastDeliveredMs": ms(at(0).Add(300 * time.Millisecond)),
@@ -277,8 +266,6 @@ func TestPhase3EpisodeGroundTruth(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", k, ep[k], v)
 		}
 	}
-	// silence runs on the whole-second update time, so the ground truth carries the last
-	// delivered message on that clock too
 	if !strings.Contains(ep["Detail"], "last_delivered_time_ms="+ms(at(0))) {
 		t.Errorf("Detail should carry the last delivered update time: %q", ep["Detail"])
 	}
@@ -293,7 +280,7 @@ func TestPhase1EpisodeCountsPerInstrumentDay(t *testing.T) {
 	cfg.Phase1.DateFilter = []string{"08-11-2021"}
 	cfg.Phase1.Window = TimeWindow{Start: "09:00:00", End: "10:00:00"}
 	cfg.Phase1.InitialRate = 1.0
-	cfg.Phase1.FinalRate = 1.0 // keep everything: only the counters matter here
+	cfg.Phase1.FinalRate = 1.0
 	cfg.Phase1.InstrumentRatio = 1.0
 
 	inj, err := NewInjector(cfg)
@@ -384,7 +371,6 @@ func TestMalformedISINNoOpIsNotInjected(t *testing.T) {
 	}
 	tm := time.Date(2021, 11, 10, 10, 30, 0, 0, time.UTC)
 
-	// Too short to truncate: nothing changes, so it must not be labelled an anomaly.
 	modified, _, _ := inj.ProcessTick(&model.RawTick{ID: "A.ETR", Exchange: "ETR", ISIN: "AB", TradingTime: tm})
 	if modified.AnomalyInjected {
 		t.Error("unchanged ISIN must not be marked as injected")
@@ -455,13 +441,10 @@ func TestTimestampInversionRecordsPreviousTick(t *testing.T) {
 	if strings.Contains(eps[0]["Detail"], "prev_ms") {
 		t.Errorf("first tick has no previous tick: %q", eps[0]["Detail"])
 	}
-	// second tick rewound to 10:29:35, before the previous tick at 10:30:00: detectable
 	if want := "prev_ms=" + ms(first); !strings.Contains(eps[1]["Detail"], want) {
 		t.Errorf("Detail %q should contain %q", eps[1]["Detail"], want)
 	}
 }
-
-// ---- price anomalies only apply to trade rows (rows with a last price) ----
 
 func TestPriceAnomaliesSkipQuoteRows(t *testing.T) {
 	cfg, epPath := baseConfig(t)
@@ -478,7 +461,7 @@ func TestPriceAnomaliesSkipQuoteRows(t *testing.T) {
 	}
 	base := time.Date(2021, 11, 9, 10, 0, 0, 0, time.UTC)
 	for i := 0; i < 6; i++ {
-		price := 0.0 // quote update: empty last price
+		price := 0.0
 		if i%2 == 0 {
 			price = 100
 		}
@@ -492,7 +475,6 @@ func TestPriceAnomaliesSkipQuoteRows(t *testing.T) {
 	inj.Close()
 
 	for _, ep := range readEpisodes(t, epPath) {
-		// every episode starts at an even second, i.e. on a trade row
 		var start int64
 		start, _ = strconv.ParseInt(ep["StartMs"], 10, 64)
 		if (start-base.UnixMilli())/1000%2 != 0 {
@@ -513,8 +495,6 @@ func TestPriceDeviationVolatilityUsesTradesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// trades alternate 100 / 101 with a quote update (price 0) between every two trades;
-	// if the zeros counted, the "returns" would be huge (ln(100/0) is undefined)
 	base := time.Date(2021, 11, 9, 10, 0, 0, 0, time.UTC)
 	var last *model.RawTick
 	for i := 0; i < 60; i++ {
@@ -534,7 +514,6 @@ func TestPriceDeviationVolatilityUsesTradesOnly(t *testing.T) {
 	if last == nil || last.AnomalyType != "price_deviation" {
 		t.Fatalf("expected an injected trade, got %+v", last)
 	}
-	// each trade-to-trade return is ln(101/100) = 0.00995, so 5 sigma is a ~5% move
 	move := math.Abs(math.Log(last.LastTradedPrice / (100 + 1)))
 	if move < 0.03 || move > 0.08 {
 		t.Errorf("a 5-sigma move on trade-to-trade volatility should be ~5%%, got %.4f (price %.4f)", move, last.LastTradedPrice)
@@ -555,7 +534,6 @@ func TestStaleRunFreezesPreviousTradeAndCountsTradeRowsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Date(2021, 11, 9, 10, 0, 0, 0, time.UTC)
-	// trade, quote, trade, quote, trade, quote, trade, quote, trade
 	prices := []float64{100, 0, 101, 0, 102, 0, 103, 0, 104}
 	var out []*model.RawTick
 	for i, p := range prices {
@@ -566,8 +544,6 @@ func TestStaleRunFreezesPreviousTradeAndCountsTradeRowsOnly(t *testing.T) {
 	}
 	inj.Close()
 
-	// The first trade has no previous trade to freeze at, so the run starts at the second
-	// trade (index 2) and covers three trade rows: indices 2, 4, 6, all frozen at 100.
 	for _, i := range []int{2, 4, 6} {
 		if out[i].LastTradedPrice != 100 {
 			t.Errorf("row %d: expected the previous trade price 100, got %v", i, out[i].LastTradedPrice)

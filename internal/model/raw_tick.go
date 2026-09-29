@@ -1,4 +1,3 @@
-// Package model contains all the main structs used across the project
 package model
 
 import (
@@ -22,20 +21,13 @@ type RawTick struct {
 	TradingTime time.Time `json:"TradingTime"`
 	Date        time.Time `json:"Date"`
 	Time        time.Time `json:"Time"`
-	
-	// Anomaly injection metadata (omitted when false/empty)
-	// Seq numbers the ticks of a run in the order they were read (1, 2, 3, ...). It rides
-	// through the feed-handler and the detector to the scores, so a score can be matched to
-	// the exact injected message: an instrument's messages often share one millisecond, so
-	// (instrument, time) cannot tell them apart.
+
 	Seq uint64 `json:"Seq"`
 
 	AnomalyInjected bool   `json:"anomaly_injected,omitempty"`
 	AnomalyType     string `json:"anomaly_type,omitempty"`
 }
 
-// ExtractExchange parses the exchange code from an instrument ID.
-// Expected format: "SYMBOL.EXCHANGE" (e.g., "RDSA.NL" → "NL", "A2ASZ7.ETR" → "ETR")
 func ExtractExchange(id string) string {
 	parts := strings.Split(id, ".")
 	if len(parts) == 2 {
@@ -44,7 +36,6 @@ func ExtractExchange(id string) string {
 	return "UNKNOWN"
 }
 
-// Validate checks if the RawTick has valid field values.
 func (r *RawTick) Validate() error {
 	if r.ID == "" {
 		return errors.New("ID is required")
@@ -76,7 +67,6 @@ func (r *RawTick) Validate() error {
 	return nil
 }
 
-// String returns a human-readable representation of the RawTick.
 func (r *RawTick) String() string {
 	return fmt.Sprintf("RawTick{ID: %s, Exchange: %s, SecType: %s, Bid: %.2f, Ask: %.2f, Last: %.2f, Volume: %.0f, Time: %s}",
 		r.ID, r.Exchange, r.SecType, r.Bid, r.Ask, r.LastTradedPrice, r.TotalVolume, r.TradingTime.Format("15:04:05"))

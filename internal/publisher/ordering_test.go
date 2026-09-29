@@ -15,8 +15,6 @@ import (
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
 )
 
-// recordingWriter records the order in which messages reach the writer. It sleeps a random
-// moment before recording so that goroutine scheduling gets every chance to reorder.
 type recordingWriter struct {
 	mu   sync.Mutex
 	seen map[string][]float64
@@ -29,7 +27,7 @@ func (w *recordingWriter) WriteMessages(_ context.Context, msgs ...kafka.Message
 	defer w.mu.Unlock()
 	for _, m := range msgs {
 		var tick struct {
-			TotalVolume float64 // carries the sequence number
+			TotalVolume float64
 		}
 		if err := json.Unmarshal(m.Value, &tick); err != nil {
 			return err
@@ -48,7 +46,6 @@ func (w *recordingWriter) count() int {
 	return w.n
 }
 
-// Consecutive ticks of one instrument must stay in order however many workers publish.
 func TestPublisherKeepsEachInstrumentsMessagesInOrder(t *testing.T) {
 	cfg := config.Default()
 	cfg.Publisher.Workers = 4
@@ -64,7 +61,6 @@ func TestPublisherKeepsEachInstrumentsMessagesInOrder(t *testing.T) {
 	go func() {
 		for i := 0; i < perInstrument; i++ {
 			for k := 0; k < instruments; k++ {
-				// the sequence number rides in the volume; publish() serialises the tick as JSON
 				input <- &model.RawTick{ID: fmt.Sprintf("I%d.ETR", k), Exchange: "ETR", SecType: "E",
 					TotalVolume: float64(i), TradingTime: time.Unix(int64(i), 0)}
 			}
@@ -103,8 +99,6 @@ func TestShardOfIsStableAndInRange(t *testing.T) {
 	}
 }
 
-// The old design, kept as a check that this test can see the problem: workers pulling
-// from one shared channel do reorder an instrument's messages.
 func TestSharedChannelWorkersWouldReorder(t *testing.T) {
 	cfg := config.Default()
 	w := &recordingWriter{seen: map[string][]float64{}}

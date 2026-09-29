@@ -10,22 +10,9 @@ import (
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
 )
 
-// QuotaConfig gives every instrument a fair share of the price anomalies instead of a
-// share proportional to its trades.
-//
-// A per-row probability puts about 96% of the episodes on the instruments that trade
-// most, because trades are very unevenly distributed (the median instrument has about
-// 10 a day). To evaluate detection by liquidity, each instrument is aimed at
-// MinEpisodes episodes per injection day: its per-row probability is raised to
-// MinEpisodes / expected trades in the window, never below the phase's base
-// probability and never above MaxRowProbability. "Expected trades" is the number the
-// instrument had in the same window on the previous day the injector saw, so the
-// mechanism needs one earlier day in the same run (the schedule provides a warm-up
-// day) and does nothing without it. It is a target in expectation, not a guarantee:
-// the ground truth records what was actually injected.
 type QuotaConfig struct {
-	MinEpisodes       int     `yaml:"min_episodes"`        // target episodes per instrument and day (0 = off)
-	MaxRowProbability float64 `yaml:"max_row_probability"` // cap on the per-row probability (default 0.25)
+	MinEpisodes       int     `yaml:"min_episodes"`
+	MaxRowProbability float64 `yaml:"max_row_probability"`
 }
 
 func (q QuotaConfig) validate(phase string) error {
@@ -38,15 +25,12 @@ func (q QuotaConfig) validate(phase string) error {
 	return nil
 }
 
-// windowTrades counts an instrument's trades inside a phase window per date.
 type windowTrades struct {
 	Date string
 	Cur  int
-	Prev int // trades in the window on the previous date seen
+	Prev int
 }
 
-// InstrumentDay is one instrument's activity on one day, before any injection. The
-// evaluation stratifies by it (trades per day, messages per day).
 type InstrumentDay struct {
 	Date     string
 	Exchange string
@@ -58,8 +42,6 @@ type InstrumentDay struct {
 
 var instrumentDayHeader = []string{"Date", "Exchange", "InstrumentID", "SecType", "Rows", "Trades"}
 
-// countRow updates the instrument's day and window counters. Called for every row,
-// before any injection, with stateMutex held.
 func (inj *Injector) countRow(state *InstrumentState, tick *model.RawTick) {
 	day := tick.TradingTime.Format("2006-01-02")
 	if state.Day != day {
@@ -107,8 +89,6 @@ func (inj *Injector) closeDay(state *InstrumentState) {
 	state.DayRows, state.DayTrades = 0, 0
 }
 
-// quotaScale returns the factor to apply to the phase's price-anomaly probabilities for
-// this instrument on this row (1 = unchanged).
 func quotaScale(state *InstrumentState, key string, q QuotaConfig, baseProbability float64, day string) float64 {
 	if q.MinEpisodes <= 0 || baseProbability <= 0 || state == nil {
 		return 1
@@ -130,7 +110,6 @@ func quotaScale(state *InstrumentState, key string, q QuotaConfig, baseProbabili
 	return p / baseProbability
 }
 
-// finalizeInstrumentDays closes every open day and writes the summary file.
 func (inj *Injector) finalizeInstrumentDays() {
 	if inj.instrumentWriter == nil {
 		return

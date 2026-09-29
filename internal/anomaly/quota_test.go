@@ -25,7 +25,7 @@ func TestQuotaScale(t *testing.T) {
 		name  string
 		state *InstrumentState
 		q     QuotaConfig
-		want  float64 // resulting per-row probability
+		want  float64
 	}{
 		{"few trades: raised to 3 per day", stateWithWindow(20, day), q, 0.15},
 		{"very few trades: capped", stateWithWindow(5, day), q, 0.25},
@@ -44,8 +44,6 @@ func TestQuotaScale(t *testing.T) {
 	}
 }
 
-// End to end: an instrument with about 12 trades a day gets about the target number of
-// episodes; without the quota it gets almost none.
 func TestQuotaGivesLowTradeInstrumentsEpisodes(t *testing.T) {
 	run := func(minEpisodes int) (episodes int, perInstrument map[string]int) {
 		cfg, epPath := baseConfig(t)
@@ -60,10 +58,10 @@ func TestQuotaGivesLowTradeInstrumentsEpisodes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, day := range []int{9, 10} { // day 9 is the warm-up day, day 10 is injected
+		for _, day := range []int{9, 10} {
 			for i := 0; i < 40; i++ {
 				id := fmt.Sprintf("LOW%d.ETR", i)
-				for k := 0; k < 12; k++ { // 12 trades, spaced 20 minutes, each preceded by a quote row
+				for k := 0; k < 12; k++ {
 					at := time.Date(2021, 11, day, 9, 40, 0, 0, time.UTC).Add(time.Duration(k) * 20 * time.Minute)
 					inj.ProcessTick(&model.RawTick{ID: id, Exchange: "ETR", SecType: "E", TradingTime: at.Add(-time.Second)})
 					inj.ProcessTick(&model.RawTick{ID: id, Exchange: "ETR", SecType: "E", LastTradedPrice: 100, TradingTime: at})
@@ -83,12 +81,9 @@ func TestQuotaGivesLowTradeInstrumentsEpisodes(t *testing.T) {
 	without, _ := run(0)
 	with, per := run(3)
 
-	// 40 instruments x 12 trades x 0.001 = about 0.5 episodes in total without the quota
 	if without > 5 {
 		t.Errorf("without the quota almost nothing should be injected, got %d", without)
 	}
-	// with it each instrument aims at 3 (the first trade of the day has no priced history,
-	// so slightly fewer): 40 x 3 = 120 in expectation
 	if with < 80 || with > 150 {
 		t.Errorf("with min_episodes 3 expected about 120 episodes over 40 instruments, got %d", with)
 	}
@@ -119,7 +114,7 @@ func TestInstrumentDaySummary(t *testing.T) {
 	send("A.ETR", "ETR", "E", 0, d9.Add(time.Second))
 	send("A.ETR", "ETR", "E", 101, d9.Add(2*time.Second))
 	send("A.ETR", "ETR", "E", 0, d10)
-	send("IDX", "FR", "I", 0, d10) // indices never reach the detector: left out of the summary
+	send("IDX", "FR", "I", 0, d10)
 	inj.Close()
 
 	instPath := strings.TrimSuffix(cfg.LogFile, ".csv") + "_instruments.csv"

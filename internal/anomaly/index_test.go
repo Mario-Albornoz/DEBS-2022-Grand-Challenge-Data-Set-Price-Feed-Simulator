@@ -7,15 +7,13 @@ import (
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
 )
 
-// Index rows never reach the detector, so nothing is injected into them and they leave no
-// trace in the ground truth.
 func TestIndexRowsAreNeverInjected(t *testing.T) {
 	cfg, epPath := baseConfig(t)
 	cfg.Phase1.Enabled = true
 	cfg.Phase1.DateFilter = []string{"10-11-2021"}
 	cfg.Phase1.Window = TimeWindow{Start: "09:00:00", End: "17:00:00"}
 	cfg.Phase1.InstrumentRatio = 1.0
-	cfg.Phase1.InitialRate, cfg.Phase1.FinalRate = 0, 0 // drop everything it touches
+	cfg.Phase1.InitialRate, cfg.Phase1.FinalRate = 0, 0
 	cfg.Phase2.Enabled = true
 	cfg.Phase2.DateFilter = []string{"10-11-2021"}
 	cfg.Phase2.Window = TimeWindow{Start: "09:00:00", End: "17:00:00"}
@@ -33,7 +31,6 @@ func TestIndexRowsAreNeverInjected(t *testing.T) {
 			t.Fatalf("an index row was modified: dropped=%v %+v", dropped, out)
 		}
 	}
-	// an equity in the same run is injected as configured
 	dropped := false
 	for i := 0; i < 5; i++ {
 		_, d, _ := inj.ProcessTick(&model.RawTick{ID: "SAP.ETR", Exchange: "ETR", SecType: "E",

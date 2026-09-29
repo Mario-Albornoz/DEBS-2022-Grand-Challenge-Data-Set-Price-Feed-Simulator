@@ -1,4 +1,3 @@
-// Package publisher provides high-throughput Kafka message publishing.
 package publisher
 
 import (
@@ -16,12 +15,11 @@ import (
 )
 
 type PublisherStats struct {
-	Published uint64 // messages handed to the writer
-	Delivered uint64 // messages Kafka acknowledged (the writer is asynchronous)
-	Failed    uint64 // messages that could not be marshalled, enqueued or delivered
+	Published uint64
+	Delivered uint64
+	Failed    uint64
 }
 
-// messageWriter is the part of kafka.Writer the publisher uses.
 type messageWriter interface {
 	WriteMessages(ctx context.Context, msgs ...kafka.Message) error
 	Close() error
@@ -33,7 +31,6 @@ type KafkaPublisher struct {
 	stats  PublisherStats
 }
 
-// NewKafkaPublisher creates a new Kafka publisher with optimized settings for throughput.
 func NewKafkaPublisher(cfg *config.Config) (*KafkaPublisher, error) {
 	compression := kafka.Snappy
 	switch cfg.Publisher.Compression {
@@ -57,7 +54,7 @@ func NewKafkaPublisher(cfg *config.Config) (*KafkaPublisher, error) {
 		WriteTimeout: 2 * time.Second,
 		MaxAttempts:  3,
 		Compression:  compression,
-		Async:        true, // Enable async writes for much higher throughput
+		Async:        true,
 	}
 
 	p := &KafkaPublisher{
@@ -65,8 +62,6 @@ func NewKafkaPublisher(cfg *config.Config) (*KafkaPublisher, error) {
 		config: cfg,
 	}
 
-	// The writer is asynchronous, so WriteMessages never reports a delivery error; only
-	// this callback does. Without it a lost message is invisible.
 	writer.Completion = func(messages []kafka.Message, err error) {
 		if err != nil {
 			atomic.AddUint64(&p.stats.Failed, uint64(len(messages)))
@@ -78,15 +73,6 @@ func NewKafkaPublisher(cfg *config.Config) (*KafkaPublisher, error) {
 	return p, nil
 }
 
-// Start begins publishing messages from the input channel using multiple workers.
-// Blocks until context is cancelled or channel is closed.
-//
-// The messages of one instrument must reach Kafka in the order they were produced: the
-// feed-handler's timestamp check, timing features and silence detection all assume it.
-// Workers that pull from a shared channel break that (two consecutive ticks of one
-// instrument can be picked up by different workers and enqueued in either order), so
-// each tick is routed to the worker that owns its instrument, and every worker publishes
-// its queue sequentially.
 func (p *KafkaPublisher) Start(ctx context.Context, input <-chan *model.RawTick) error {
 	workers := p.config.Publisher.Workers
 	if workers < 1 {
@@ -126,7 +112,6 @@ func (p *KafkaPublisher) Start(ctx context.Context, input <-chan *model.RawTick)
 	return p.Close()
 }
 
-// shardOf maps an instrument to the worker that publishes it.
 func shardOf(id string, workers int) int {
 	h := fnv.New32a()
 	h.Write([]byte(id))
@@ -167,12 +152,10 @@ func (p *KafkaPublisher) publish(ctx context.Context, tick *model.RawTick) error
 	return p.writer.WriteMessages(ctx, msg)
 }
 
-// Close flushes pending messages and closes the Kafka writer.
 func (p *KafkaPublisher) Close() error {
 	return p.writer.Close()
 }
 
-// GetStats returns the current publishing statistics.
 func (p *KafkaPublisher) GetStats() PublisherStats {
 	return PublisherStats{
 		Published: atomic.LoadUint64(&p.stats.Published),

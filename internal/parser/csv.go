@@ -1,4 +1,3 @@
-// Package parser provides high-performance CSV parsing for DEBS 2022 market data files.
 package parser
 
 import (
@@ -18,21 +17,18 @@ import (
 )
 
 type ParserStats struct {
-	RowsParsed   uint64
-	RowsFailed   uint64
-	BytesRead    uint64
-	
-	// Field emptiness tracking
-	EmptyAsk     uint64
-	EmptyBid     uint64
-	EmptyVolume  uint64
-	
-	// Zero value tracking (explicit zeros, not empty)
-	ZeroAsk      uint64
-	ZeroBid      uint64
-	ZeroVolume   uint64
-	
-	// Error type breakdown
+	RowsParsed uint64
+	RowsFailed uint64
+	BytesRead  uint64
+
+	EmptyAsk    uint64
+	EmptyBid    uint64
+	EmptyVolume uint64
+
+	ZeroAsk    uint64
+	ZeroBid    uint64
+	ZeroVolume uint64
+
 	ErrInsufficientFields uint64
 	ErrInvalidTime        uint64
 	ErrInvalidDateTime    uint64
@@ -46,13 +42,12 @@ type ParseError struct {
 }
 
 type CSVParser struct {
-	config       *config.Config
-	stats        ParserStats
-	lastError    ParseError
-	errorSample  uint64 // Log every Nth error
+	config      *config.Config
+	stats       ParserStats
+	lastError   ParseError
+	errorSample uint64
 }
 
-// NewCSVParser creates a new CSV parser with the given configuration.
 func NewCSVParser(cfg *config.Config) *CSVParser {
 	return &CSVParser{
 		config:      cfg,
@@ -60,8 +55,6 @@ func NewCSVParser(cfg *config.Config) *CSVParser {
 	}
 }
 
-// ParseFile reads and parses a CSV file, sending RawTick messages to the output channel.
-// Returns when file is fully processed or context is cancelled.
 func (p *CSVParser) ParseFile(ctx context.Context, filepath string, output chan<- *model.RawTick) error {
 	file, err := os.Open(filepath)
 	if err != nil {
@@ -133,7 +126,6 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	tick.Exchange = model.ExtractExchange(tick.ID)
 	tick.ISIN = fields[14]
 
-	// Track empty/zero fields for Ask
 	ask, isEmpty, err := parseFloatWithTracking(fields[4])
 	if err != nil {
 		ReleaseTick(tick)
@@ -142,7 +134,6 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	}
 	tick.Ask = ask
 
-	// Track empty/zero fields for Bid
 	bid, isBidEmpty, err := parseFloatWithTracking(fields[6])
 	if err != nil {
 		ReleaseTick(tick)
@@ -151,7 +142,6 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	}
 	tick.Bid = bid
 
-	// Track empty/zero fields for Volume
 	volume, isVolEmpty, err := parseFloatWithTracking(fields[24])
 	if err != nil {
 		ReleaseTick(tick)
@@ -170,8 +160,7 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	tick.LastTradedPrice = lastPrice
 
 	tradingTime, err := parseTime(fields[23])
-	
-	// Parse Date/Time fields for completeness and fallback
+
 	date, timeVal, err2 := parseDateTime(fields[2], fields[3])
 	if err2 != nil {
 		ReleaseTick(tick)
@@ -180,38 +169,31 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	}
 	tick.Date = date
 	tick.Time = timeVal
-	
-	// Handle TradingTime
+
 	if err != nil {
-		// TradingTime is empty/invalid - use Time field as fallback
 		tick.TradingTime = timeVal
 	} else if tradingTime.Year() == 0 {
-		// TradingTime has year 0 (e.g., "00:00:00.348" → "0000-01-01T00:00:00.348Z")
-		// Extract time-of-day from TradingTime and combine with date from Date field
-		// This preserves millisecond precision that Time field lacks
 		tick.TradingTime = time.Date(
 			date.Year(), date.Month(), date.Day(),
 			tradingTime.Hour(), tradingTime.Minute(), tradingTime.Second(), tradingTime.Nanosecond(),
 			time.UTC,
 		)
 	} else {
-		// TradingTime is valid, use it as-is
 		tick.TradingTime = tradingTime
 	}
 
-	// Only count empty/zero fields for successfully parsed rows
 	if isEmpty {
 		atomic.AddUint64(&p.stats.EmptyAsk, 1)
 	} else if ask == 0 {
 		atomic.AddUint64(&p.stats.ZeroAsk, 1)
 	}
-	
+
 	if isBidEmpty {
 		atomic.AddUint64(&p.stats.EmptyBid, 1)
 	} else if bid == 0 {
 		atomic.AddUint64(&p.stats.ZeroBid, 1)
 	}
-	
+
 	if isVolEmpty {
 		atomic.AddUint64(&p.stats.EmptyVolume, 1)
 	} else if volume == 0 {
@@ -229,7 +211,6 @@ func parseFloat(s string) (float64, error) {
 	return strconv.ParseFloat(s, 64)
 }
 
-// parseFloatWithTracking parses a float and tracks whether it was empty
 func parseFloatWithTracking(s string) (value float64, isEmpty bool, err error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -239,11 +220,9 @@ func parseFloatWithTracking(s string) (value float64, isEmpty bool, err error) {
 	return val, false, err
 }
 
-// logError logs parse errors with sampling to avoid log spam
 func (p *CSVParser) logError(lineNum int, err error) {
 	failed := atomic.LoadUint64(&p.stats.RowsFailed)
-	
-	// Log every Nth error or first few errors
+
 	if failed <= 10 || failed%p.errorSample == 0 {
 		log.Printf("[WARN] Parse error at line %d (total failed: %d): %v", lineNum, failed, err)
 	}
@@ -271,7 +250,6 @@ func parseDateTime(dateStr, timeStr string) (time.Time, time.Time, error) {
 	return dateOnly, dt, nil
 }
 
-// GetStats returns the current parsing statistics.
 func (p *CSVParser) GetStats() ParserStats {
 	return ParserStats{
 		RowsParsed:            atomic.LoadUint64(&p.stats.RowsParsed),

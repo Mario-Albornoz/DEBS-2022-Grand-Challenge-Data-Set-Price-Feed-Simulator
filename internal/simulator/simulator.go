@@ -21,7 +21,7 @@ type SimulatorStats struct {
 	TicksRead      uint64
 	TicksPublished uint64
 	TicksFailed    uint64
-	TicksDropped   uint64 // Anomalies dropped
+	TicksDropped   uint64
 	BytesRead      uint64
 	StartTime      time.Time
 }
@@ -34,10 +34,9 @@ type Simulator struct {
 	anomaly     *anomaly.Injector
 	stats       SimulatorStats
 	stopOnce    sync.Once
-	currentFile atomic.Value // stores string of current file being processed
+	currentFile atomic.Value
 }
 
-// NewSimulator creates a new simulator instance with all required components.
 func NewSimulator(cfg *config.Config) (*Simulator, error) {
 	pub, err := publisher.NewKafkaPublisher(cfg)
 	if err != nil {
@@ -47,14 +46,13 @@ func NewSimulator(cfg *config.Config) (*Simulator, error) {
 	mode := SimulationMode(cfg.Simulator.Mode)
 	timing := NewTimingSimulator(mode, cfg.Simulator.AccelerationFactor)
 
-	// Initialize anomaly injector (can be nil if disabled)
 	anomalyInj, err := anomaly.NewInjector(cfg.Anomaly)
 	if err != nil {
 		return nil, fmt.Errorf("create anomaly injector: %w", err)
 	}
 
 	if anomalyInj != nil {
-		log.Printf("[INFO] Anomaly injection ENABLED (seed: %d, log: %s)", 
+		log.Printf("[INFO] Anomaly injection ENABLED (seed: %d, log: %s)",
 			cfg.Anomaly.Seed, cfg.Anomaly.LogFile)
 	}
 
@@ -70,7 +68,6 @@ func NewSimulator(cfg *config.Config) (*Simulator, error) {
 	}, nil
 }
 
-// Start begins the simulation, processing all CSV files and publishing to Kafka.
 func (s *Simulator) Start(ctx context.Context) error {
 	log.Printf("[INFO] Starting price feed simulator in %s mode", s.config.Simulator.Mode)
 	log.Printf("[INFO] Connecting to Kafka broker: %v", s.config.Kafka.Brokers)
@@ -92,7 +89,6 @@ func (s *Simulator) Start(ctx context.Context) error {
 	parserChan := make(chan *model.RawTick, s.config.Performance.ChannelBuffer)
 	timingChan := make(chan *model.RawTick, 1000)
 
-	// Create cancelable context for workers so we can stop them when done
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	defer cancelWorkers()
 
@@ -126,10 +122,8 @@ func (s *Simulator) Start(ctx context.Context) error {
 
 	close(parserChan)
 
-	// Cancel worker context to stop statsLogger and other workers
 	cancelWorkers()
 
-	// Wait for all workers to finish processing
 	wg.Wait()
 
 	log.Printf("[INFO] All files processed, simulator shutting down gracefully")
@@ -160,16 +154,13 @@ func (s *Simulator) timingWorker(ctx context.Context, input <-chan *model.RawTic
 				return
 			}
 
-			// the run-wide sequence number of this tick (see model.RawTick.Seq)
 			tick.Seq = atomic.AddUint64(&s.stats.TicksRead, 1)
 
-			// Apply anomaly injection if enabled
 			if s.anomaly != nil {
 				modifiedTick, shouldDrop, err := s.anomaly.ProcessTick(tick)
 				if err != nil {
 					log.Printf("[WARN] Anomaly injection error for %s: %v", tick.ID, err)
 				} else if shouldDrop {
-					// Tick dropped by anomaly injector
 					atomic.AddUint64(&s.stats.TicksDropped, 1)
 					parser.ReleaseTick(tick)
 					continue
@@ -207,19 +198,17 @@ func (s *Simulator) findCSVFiles() ([]string, error) {
 	return filepath.Glob(pattern)
 }
 
-// Stop gracefully shuts down the simulator, flushing any pending messages.
 func (s *Simulator) Stop() error {
 	var err error
 	s.stopOnce.Do(func() {
 		if s.anomaly != nil {
-			// Write manifest before closing
 			manifestPath := "data/injection_manifest.json"
 			if manifestErr := s.anomaly.WriteManifest(manifestPath); manifestErr != nil {
 				log.Printf("[WARN] Failed to write anomaly manifest: %v", manifestErr)
 			} else {
 				log.Printf("[INFO] Wrote anomaly manifest to %s", manifestPath)
 			}
-			
+
 			if closeErr := s.anomaly.Close(); closeErr != nil {
 				log.Printf("[WARN] Failed to close anomaly injector: %v", closeErr)
 			}
@@ -229,7 +218,6 @@ func (s *Simulator) Stop() error {
 	return err
 }
 
-// PrintStats logs the current simulation statistics.
 func (s *Simulator) PrintStats() {
 	parserStats := s.parser.GetStats()
 	pubStats := s.publisher.GetStats()
@@ -251,7 +239,6 @@ func (s *Simulator) PrintStats() {
 	log.Printf("[INFO]   Ticks published: %s (acknowledged by Kafka: %s)", formatNumber(pubStats.Published), formatNumber(pubStats.Delivered))
 	log.Printf("[INFO]   Throughput:      %s ticks/sec", formatNumber(uint64(throughput)))
 
-	// Error breakdown
 	totalErrors := pubStats.Failed + parserStats.RowsFailed
 	log.Printf("[INFO]   Errors:          %s", formatNumber(totalErrors))
 	if totalErrors > 0 {
@@ -271,14 +258,12 @@ func (s *Simulator) PrintStats() {
 		log.Printf("[INFO]     Publish errors: %s", formatNumber(pubStats.Failed))
 	}
 
-	// Empty field tracking - use RowsParsed for percentage
 	if parserStats.RowsParsed > 0 {
 		log.Printf("[INFO]   Empty fields:")
 		log.Printf("[INFO]     Ask:    %s (%.1f%%)", formatNumber(parserStats.EmptyAsk), percentage(parserStats.EmptyAsk, parserStats.RowsParsed))
 		log.Printf("[INFO]     Bid:    %s (%.1f%%)", formatNumber(parserStats.EmptyBid), percentage(parserStats.EmptyBid, parserStats.RowsParsed))
 		log.Printf("[INFO]     Volume: %s (%.1f%%)", formatNumber(parserStats.EmptyVolume), percentage(parserStats.EmptyVolume, parserStats.RowsParsed))
 
-		// Zero value tracking
 		log.Printf("[INFO]   Zero values:")
 		log.Printf("[INFO]     Ask:    %s (%.1f%%)", formatNumber(parserStats.ZeroAsk), percentage(parserStats.ZeroAsk, parserStats.RowsParsed))
 		log.Printf("[INFO]     Bid:    %s (%.1f%%)", formatNumber(parserStats.ZeroBid), percentage(parserStats.ZeroBid, parserStats.RowsParsed))
@@ -286,29 +271,28 @@ func (s *Simulator) PrintStats() {
 	}
 
 	log.Printf("[INFO]   Bytes read:      %s", formatBytes(parserStats.BytesRead))
-	
-	// Anomaly statistics
+
 	if s.anomaly != nil {
 		anomalyStats := s.anomaly.GetStats()
 		ticksDropped := atomic.LoadUint64(&s.stats.TicksDropped)
-		
+
 		log.Printf("[INFO]   Anomaly Injection:")
-		log.Printf("[INFO]     Ticks dropped:  %s (Phase1: %s, Phase3: %s)", 
+		log.Printf("[INFO]     Ticks dropped:  %s (Phase1: %s, Phase3: %s)",
 			formatNumber(ticksDropped),
 			formatNumber(anomalyStats.Phase1Dropped),
 			formatNumber(anomalyStats.Phase3Dropped))
-		log.Printf("[INFO]     Ticks modified: %s (Phase2: %s, Phase4: %s)", 
-			formatNumber(anomalyStats.Phase2Injected + anomalyStats.Phase4Injected),
+		log.Printf("[INFO]     Ticks modified: %s (Phase2: %s, Phase4: %s)",
+			formatNumber(anomalyStats.Phase2Injected+anomalyStats.Phase4Injected),
 			formatNumber(anomalyStats.Phase2Injected),
 			formatNumber(anomalyStats.Phase4Injected))
-		
+
 		if anomalyStats.Phase2Injected > 0 {
 			log.Printf("[INFO]       Contextual: Spikes=%s, Stale=%s, Deviations=%s",
 				formatNumber(anomalyStats.PriceSpikes),
 				formatNumber(anomalyStats.StalePrices),
 				formatNumber(anomalyStats.PriceDeviations))
 		}
-		
+
 		if anomalyStats.Phase4Injected > 0 {
 			log.Printf("[INFO]       Point failures: Null=%s, Malformed=%s, TimeInv=%s",
 				formatNumber(anomalyStats.NullPrices+anomalyStats.ImplausiblePrices),
@@ -316,7 +300,7 @@ func (s *Simulator) PrintStats() {
 				formatNumber(anomalyStats.TimestampInversions))
 		}
 	}
-	
+
 	log.Println("[INFO] =====================================")
 }
 

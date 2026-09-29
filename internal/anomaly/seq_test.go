@@ -8,8 +8,6 @@ import (
 	"github.com/Mario-Albornoz/DEBS-2022-Dataset-price-feed-simulator/internal/model"
 )
 
-// The ground truth names the exact message, so a score can be matched to it even when
-// several of the instrument's messages share a millisecond.
 func TestEpisodesCarryTheMessageSequenceNumber(t *testing.T) {
 	cfg, epPath := baseConfig(t)
 	cfg.Phase4.Enabled = true
@@ -23,7 +21,6 @@ func TestEpisodesCarryTheMessageSequenceNumber(t *testing.T) {
 	at := time.Date(2021, 11, 10, 10, 0, 0, 412_000_000, time.UTC)
 	want := map[uint64]bool{}
 	for i := uint64(1); i <= 5; i++ {
-		// five trades in the same millisecond, as the real data has
 		tick := &model.RawTick{ID: "A.ETR", Exchange: "ETR", SecType: "E", LastTradedPrice: 100, TradingTime: at, Seq: 1000 + i}
 		inj.ProcessTick(tick)
 		want[1000+i] = true

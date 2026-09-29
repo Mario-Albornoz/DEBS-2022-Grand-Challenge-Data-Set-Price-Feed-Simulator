@@ -1,4 +1,3 @@
-// Package simulator provides timing control and orchestration for market data replay.
 package simulator
 
 import (
@@ -22,7 +21,6 @@ type TimingSimulator struct {
 	firstTick          bool
 }
 
-// NewTimingSimulator creates a new timing simulator with the specified mode and acceleration factor.
 func NewTimingSimulator(mode SimulationMode, factor float64) *TimingSimulator {
 	return &TimingSimulator{
 		mode:               mode,
@@ -31,7 +29,6 @@ func NewTimingSimulator(mode SimulationMode, factor float64) *TimingSimulator {
 	}
 }
 
-// WaitForNextTick delays execution to maintain simulation timing based on the mode.
 func (s *TimingSimulator) WaitForNextTick(tick *model.RawTick) {
 	if s.mode == ModeFullSpeed {
 		return
@@ -51,7 +48,6 @@ func (s *TimingSimulator) WaitForNextTick(tick *model.RawTick) {
 	s.lastTickTime = tick.TradingTime
 }
 
-// CalculateDelay computes the delay needed before processing the next tick.
 func (s *TimingSimulator) CalculateDelay(tick *model.RawTick) time.Duration {
 	if s.mode == ModeFullSpeed {
 		return 0
@@ -73,7 +69,6 @@ func (s *TimingSimulator) CalculateDelay(tick *model.RawTick) time.Duration {
 	return diff
 }
 
-// Reset clears the timing state for a new simulation run.
 func (s *TimingSimulator) Reset() {
 	s.firstTick = true
 	s.lastTickTime = time.Time{}

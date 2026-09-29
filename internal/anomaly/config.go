@@ -6,16 +6,11 @@ import (
 )
 
 type Config struct {
-	Enabled bool  `yaml:"enabled"`
-	Seed    int64 `yaml:"seed"`
+	Enabled bool   `yaml:"enabled"`
+	Seed    int64  `yaml:"seed"`
 	LogFile string `yaml:"log_file"`
 
-	// EpisodeFile receives the episode-level ground truth (one row per anomaly
-	// episode). When empty it defaults to "<log_file without extension>_episodes.csv".
-	EpisodeFile string `yaml:"episode_file,omitempty"`
-	// InstrumentFile receives each instrument's rows and trades per day (before any
-	// injection), which the evaluation stratifies by. Defaults to
-	// "<log_file without extension>_instruments.csv".
+	EpisodeFile    string `yaml:"episode_file,omitempty"`
 	InstrumentFile string `yaml:"instrument_file,omitempty"`
 
 	Phase1 Phase1Config `yaml:"phase1_tick_rate_decline"`
@@ -31,66 +26,58 @@ type TimeWindow struct {
 
 type Phase1Config struct {
 	Enabled         bool       `yaml:"enabled"`
-	DateFilter      []string   `yaml:"date_filter,omitempty"` // ["08-11-2021"] = only these dates
+	DateFilter      []string   `yaml:"date_filter,omitempty"`
 	Window          TimeWindow `yaml:"window"`
 	DeclinePattern  string     `yaml:"decline_pattern"`
-	InitialRate     float64    `yaml:"initial_rate"`     // 1.0 = 100%
-	FinalRate       float64    `yaml:"final_rate"`       // 0.3 = 30%
-	InstrumentRatio float64    `yaml:"instrument_ratio"` // 0.4 = 40% of instruments
+	InitialRate     float64    `yaml:"initial_rate"`
+	FinalRate       float64    `yaml:"final_rate"`
+	InstrumentRatio float64    `yaml:"instrument_ratio"`
 }
 
 type Phase2Config struct {
-	Enabled            bool       `yaml:"enabled"`
-	DateFilter         []string   `yaml:"date_filter,omitempty"` // ["09-11-2021"]
-	Window             TimeWindow `yaml:"window"`
-	ContextWindowHours float64    `yaml:"context_window_hours"` // Hours of market history
+	Enabled            bool        `yaml:"enabled"`
+	DateFilter         []string    `yaml:"date_filter,omitempty"`
+	Window             TimeWindow  `yaml:"window"`
+	ContextWindowHours float64     `yaml:"context_window_hours"`
 	Quota              QuotaConfig `yaml:"per_instrument_quota"`
-	
+
 	Strategies []ContextualStrategy `yaml:"strategies"`
 }
 
 type ContextualStrategy struct {
-	Type        string    `yaml:"type"`
-	Probability float64   `yaml:"probability"` // 0.03 = 3%
-	
-	// price_spike: [2.0, 5.0] = 2x-5x multiplier of the recent average price.
-	// price_deviation: [4.0, 8.0] = std-devs of recent log returns (default [4, 8]).
-	DeviationRange []float64 `yaml:"deviation_range,omitempty"`
-	// stale_price: the previous price is repeated for this many consecutive ticks
-	// of the instrument (default [3, 10]).
-	RepeatCount []int `yaml:"repeat_count,omitempty"`
-	// price_deviation: floor for the return std-dev so flat instruments still get a
-	// visible deviation (default 0.002 = 0.2%).
-	MinRelativeDeviation float64 `yaml:"min_relative_deviation,omitempty"`
+	Type        string  `yaml:"type"`
+	Probability float64 `yaml:"probability"`
+
+	DeviationRange       []float64 `yaml:"deviation_range,omitempty"`
+	RepeatCount          []int     `yaml:"repeat_count,omitempty"`
+	MinRelativeDeviation float64   `yaml:"min_relative_deviation,omitempty"`
 }
 
 type Phase3Config struct {
 	Enabled         bool       `yaml:"enabled"`
-	DateFilter      []string   `yaml:"date_filter,omitempty"` // ["08-11-2021"]
+	DateFilter      []string   `yaml:"date_filter,omitempty"`
 	Window          TimeWindow `yaml:"window"`
-	BlackoutSeconds int        `yaml:"blackout_seconds"` // Total blackout duration
-	InstrumentRatio float64    `yaml:"instrument_ratio"` // 0.7 = 70%
+	BlackoutSeconds int        `yaml:"blackout_seconds"`
+	InstrumentRatio float64    `yaml:"instrument_ratio"`
 	ExchangeFilter  []string   `yaml:"exchange_filter,omitempty"`
 }
 
 type Phase4Config struct {
 	Enabled    bool                   `yaml:"enabled"`
-	DateFilter []string               `yaml:"date_filter,omitempty"` // ["10-11-2021"]
+	DateFilter []string               `yaml:"date_filter,omitempty"`
 	Window     TimeWindow             `yaml:"window"`
 	Strategies []PointFailureStrategy `yaml:"strategies"`
-	Quota      QuotaConfig            `yaml:"per_instrument_quota"` // applies to implausible_price
+	Quota      QuotaConfig            `yaml:"per_instrument_quota"`
 }
 
 type PointFailureStrategy struct {
-	Type        string   `yaml:"type"`
-	Probability float64  `yaml:"probability"` // 0.02 = 2%
-	
-	Field []string `yaml:"field,omitempty"`
-	// implausible_price: the last price is multiplied or divided by a factor in this
-	// range, e.g. [10, 100] (default [10, 100]).
+	Type        string  `yaml:"type"`
+	Probability float64 `yaml:"probability"`
+
+	Field           []string  `yaml:"field,omitempty"`
 	MultiplierRange []float64 `yaml:"multiplier_range,omitempty"`
-	Corruption    []string `yaml:"corruption,omitempty"`
-	RewindSeconds []int    `yaml:"rewind_seconds,omitempty"` // [1, 300] seconds
+	Corruption      []string  `yaml:"corruption,omitempty"`
+	RewindSeconds   []int     `yaml:"rewind_seconds,omitempty"`
 }
 
 func DefaultConfig() Config {
@@ -98,9 +85,9 @@ func DefaultConfig() Config {
 		Enabled: false,
 		Seed:    42,
 		LogFile: "anomaly_log.csv",
-		
+
 		Phase1: Phase1Config{
-			Enabled: true,
+			Enabled:    true,
 			DateFilter: []string{"08-11-2021"},
 			Window: TimeWindow{
 				Start: "09:30:00",
@@ -111,9 +98,9 @@ func DefaultConfig() Config {
 			FinalRate:       0.3,
 			InstrumentRatio: 0.4,
 		},
-		
+
 		Phase2: Phase2Config{
-			Enabled: true,
+			Enabled:    true,
 			DateFilter: []string{"09-11-2021"},
 			Window: TimeWindow{
 				Start: "09:30:00",
@@ -132,18 +119,15 @@ func DefaultConfig() Config {
 					RepeatCount: []int{3, 10},
 				},
 				{
-					// Plausible-looking last-price deviation. Bid/Ask are not
-					// used by the detector (trade-only data), so quote-based
-					// injections cannot be evaluated.
 					Type:           "price_deviation",
 					Probability:    0.01,
 					DeviationRange: []float64{4.0, 8.0},
 				},
 			},
 		},
-		
+
 		Phase3: Phase3Config{
-			Enabled: true,
+			Enabled:    true,
 			DateFilter: []string{"08-11-2021"},
 			Window: TimeWindow{
 				Start: "14:30:00",
@@ -151,12 +135,11 @@ func DefaultConfig() Config {
 			},
 			BlackoutSeconds: 30,
 			InstrumentRatio: 0.7,
-			// Must match model.ExtractExchange(ID) (e.g. "ETR"), not the venue name.
-			ExchangeFilter: []string{"ETR"},
+			ExchangeFilter:  []string{"ETR"},
 		},
-		
+
 		Phase4: Phase4Config{
-			Enabled: true,
+			Enabled:    true,
 			DateFilter: []string{"10-11-2021"},
 			Window: TimeWindow{
 				Start: "09:30:00",
@@ -187,7 +170,7 @@ func (c Config) Validate() error {
 	if !c.Enabled {
 		return nil
 	}
-	
+
 	phases := []struct {
 		name       string
 		enabled    bool
@@ -199,51 +182,49 @@ func (c Config) Validate() error {
 		{"Phase3", c.Phase3.Enabled, c.Phase3.Window, c.Phase3.DateFilter},
 		{"Phase4", c.Phase4.Enabled, c.Phase4.Window, c.Phase4.DateFilter},
 	}
-	
+
 	for i, p1 := range phases {
 		if !p1.enabled {
 			continue
 		}
-		
+
 		start1, err := ParseTime(p1.window.Start)
 		if err != nil {
 			return fmt.Errorf("%s: invalid start time: %w", p1.name, err)
 		}
-		
+
 		end1, err := ParseTime(p1.window.End)
 		if err != nil {
 			return fmt.Errorf("%s: invalid end time: %w", p1.name, err)
 		}
-		
+
 		if !start1.Before(end1) {
 			return fmt.Errorf("%s: start time must be before end time", p1.name)
 		}
-		
+
 		for j := i + 1; j < len(phases); j++ {
 			p2 := phases[j]
 			if !p2.enabled {
 				continue
 			}
-			
+
 			if !datesOverlap(p1.dateFilter, p2.dateFilter) {
 				continue
 			}
-			
+
 			start2, _ := ParseTime(p2.window.Start)
 			end2, _ := ParseTime(p2.window.End)
-			
+
 			if overlaps(start1, end1, start2, end2) {
-				return fmt.Errorf("%s and %s have overlapping time windows on same date (sequential phases required)", 
+				return fmt.Errorf("%s and %s have overlapping time windows on same date (sequential phases required)",
 					p1.name, p2.name)
 			}
 		}
 	}
-	
+
 	return c.validateStrategies()
 }
 
-// validateStrategies rejects unknown strategy types and malformed parameters so a
-// stale or misspelled config fails at startup instead of silently injecting nothing.
 func (c Config) validateStrategies() error {
 	if err := c.Phase2.Quota.validate("Phase2"); err != nil {
 		return err
@@ -349,7 +330,7 @@ func datesOverlap(dates1, dates2 []string) bool {
 	if len(dates1) == 0 || len(dates2) == 0 {
 		return true
 	}
-	
+
 	for _, d1 := range dates1 {
 		for _, d2 := range dates2 {
 			if d1 == d2 {
@@ -357,7 +338,7 @@ func datesOverlap(dates1, dates2 []string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -374,13 +355,13 @@ func (tw TimeWindow) IsInWindow(marketTime time.Time) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	end, err := ParseTime(tw.End)
 	if err != nil {
 		return false, err
 	}
-	
+
 	checkTime := time.Date(0, 1, 1, marketTime.Hour(), marketTime.Minute(), marketTime.Second(), 0, time.UTC)
-	
+
 	return !checkTime.Before(start) && !checkTime.After(end), nil
 }
