@@ -95,25 +95,3 @@ func TestCalculateDelaySameTime(t *testing.T) {
 		t.Errorf("Same time delay = %v, want 0", delay)
 	}
 }
-
-func TestReset(t *testing.T) {
-	sim := NewTimingSimulator(ModeRealtime, 1.0)
-
-	baseTime := time.Date(2021, 11, 8, 9, 30, 0, 0, time.UTC)
-	tick := &model.RawTick{TradingTime: baseTime}
-
-	sim.WaitForNextTick(tick)
-
-	if sim.firstTick {
-		t.Error("Expected firstTick to be false after first tick")
-	}
-
-	sim.Reset()
-
-	if !sim.firstTick {
-		t.Error("Expected firstTick to be true after reset")
-	}
-	if !sim.lastTickTime.IsZero() {
-		t.Error("Expected lastTickTime to be zero after reset")
-	}
-}

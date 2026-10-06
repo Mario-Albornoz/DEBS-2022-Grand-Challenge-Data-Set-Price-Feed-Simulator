@@ -18,12 +18,9 @@ import (
 )
 
 type SimulatorStats struct {
-	TicksRead      uint64
-	TicksPublished uint64
-	TicksFailed    uint64
-	TicksDropped   uint64
-	BytesRead      uint64
-	StartTime      time.Time
+	TicksRead    uint64
+	TicksDropped uint64
+	StartTime    time.Time
 }
 
 type Simulator struct {

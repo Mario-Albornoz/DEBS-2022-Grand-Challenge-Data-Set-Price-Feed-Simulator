@@ -592,7 +592,6 @@ func (inj *Injector) GetStats() Stats {
 type Manifest struct {
 	ExperimentID        string               `json:"experiment_id"`
 	Seed                int64                `json:"seed"`
-	ConfigFile          string               `json:"config_file,omitempty"`
 	StartTime           string               `json:"start_time"`
 	EndTime             string               `json:"end_time"`
 	Phases              map[string]PhaseInfo `json:"phases"`

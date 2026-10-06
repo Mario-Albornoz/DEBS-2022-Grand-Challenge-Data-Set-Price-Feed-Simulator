@@ -68,8 +68,3 @@ func (s *TimingSimulator) CalculateDelay(tick *model.RawTick) time.Duration {
 
 	return diff
 }
-
-func (s *TimingSimulator) Reset() {
-	s.firstTick = true
-	s.lastTickTime = time.Time{}
-}

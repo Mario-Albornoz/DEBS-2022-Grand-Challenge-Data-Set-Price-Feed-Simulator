@@ -35,16 +35,9 @@ type ParserStats struct {
 	ErrInvalidNumber      uint64
 }
 
-type ParseError struct {
-	LineNum int
-	Type    string
-	Message string
-}
-
 type CSVParser struct {
 	config      *config.Config
 	stats       ParserStats
-	lastError   ParseError
 	errorSample uint64
 }
 
@@ -201,14 +194,6 @@ func (p *CSVParser) parseRow(line string, lineNum int) (*model.RawTick, error) {
 	}
 
 	return tick, nil
-}
-
-func parseFloat(s string) (float64, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, nil
-	}
-	return strconv.ParseFloat(s, 64)
 }
 
 func parseFloatWithTracking(s string) (value float64, isEmpty bool, err error) {
